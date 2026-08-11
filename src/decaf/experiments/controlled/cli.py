@@ -198,9 +198,9 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
                     {
                         "model_id": str(row.model_id),
                         "logical_path": f"checkpoints/c0/{row.model_id}.pt",
-                        "bytes": _manifest_asset_path(
-                            c0_manifest, row.checkpoint_path
-                        ).stat().st_size,
+                        "bytes": _manifest_asset_path(c0_manifest, row.checkpoint_path)
+                        .stat()
+                        .st_size,
                         "sha256": str(row.checkpoint_sha256),
                     }
                     for row in c0_rows.itertuples(index=False)
@@ -209,9 +209,9 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
                     {
                         "model_id": str(row.model_id),
                         "logical_path": f"probability_caches/c0/{row.model_id}.npy",
-                        "bytes": _manifest_asset_path(
-                            c0_manifest, row.probability_cache_path
-                        ).stat().st_size,
+                        "bytes": _manifest_asset_path(c0_manifest, row.probability_cache_path)
+                        .stat()
+                        .st_size,
                         "sha256": str(row.probability_cache_sha256),
                     }
                     for row in c0_rows.itertuples(index=False)
@@ -229,9 +229,9 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
                     {
                         "model_id": str(row.model_id),
                         "logical_path": f"checkpoints/c1/{row.model_id}.pt",
-                        "bytes": _manifest_asset_path(
-                            c1_manifest, row.checkpoint_path
-                        ).stat().st_size,
+                        "bytes": _manifest_asset_path(c1_manifest, row.checkpoint_path)
+                        .stat()
+                        .st_size,
                         "sha256": str(row.checkpoint_sha256),
                         "producer_member_id": str(row.producer_member_id),
                     }
@@ -250,9 +250,9 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
                     {
                         "model_id": str(row.model_id),
                         "logical_path": f"checkpoints/c2/{row.model_id}.pt",
-                        "bytes": _manifest_asset_path(
-                            c2_manifest, row.checkpoint_path
-                        ).stat().st_size,
+                        "bytes": _manifest_asset_path(c2_manifest, row.checkpoint_path)
+                        .stat()
+                        .st_size,
                         "sha256": str(row.checkpoint_sha256),
                         "producer_member_id": str(row.producer_member_id),
                     }
@@ -366,8 +366,7 @@ def compute_handler(context: RunContext) -> Mapping[str, Any]:
             "run_bindings": run_bindings,
             "member_manifest_sha256": member_manifest_digest,
             "analysis_manifest_sha256": sha256_file(
-                source_root
-                / str(execution.get("analysis_manifest", "manifests/analysis.json"))
+                source_root / str(execution.get("analysis_manifest", "manifests/analysis.json"))
             ),
             "items": analysis_receipts,
         },

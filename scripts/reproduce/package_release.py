@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import os
@@ -19,6 +20,7 @@ import yaml
 
 from decaf.experiments.common import atomic_json, atomic_text
 from decaf.paper.manifest import load_visual_manifest
+from decaf.paper.reference import load_reference_runs
 
 PROVENANCE_FILES = (
     "historical_git_state.json",
@@ -79,6 +81,165 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _copy(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(source.read_bytes())
+
+
+def _validate_provenance_manifests(
+    provenance: Path,
+    repository: Path,
+) -> dict[str, Any]:
+    tracked_runs = load_reference_runs(repository / "manifests" / "reference_runs")
+    inventory = yaml.safe_load((provenance / "reference_runs.yaml").read_text(encoding="utf-8"))
+    records = inventory.get("runs") if isinstance(inventory, dict) else None
+    if (
+        inventory.get("schema_version") != 1
+        or inventory.get("reference_run_count") != 9
+        or inventory.get("all_archives_present") is not True
+        or not isinstance(records, list)
+    ):
+        raise RuntimeError("reference-run provenance inventory is invalid")
+    indexed = {str(record.get("id")): record for record in records if isinstance(record, dict)}
+    if set(indexed) != set(tracked_runs) or len(records) != len(indexed):
+        raise RuntimeError("reference-run provenance IDs differ from tracked manifests")
+    archive_paths: dict[str, tuple[str, int]] = {}
+    for run_id, run in tracked_runs.items():
+        record = indexed[run_id]
+        expected = {
+            "family": run.family,
+            "scientific_status": run.scientific_status,
+            "archive_sha256": run.archive_sha256,
+            "archive_size_bytes": run.archive_size_bytes,
+            "archive_member_count": run.archive_member_count,
+        }
+        if any(record.get(key) != value for key, value in expected.items()):
+            raise RuntimeError(
+                f"reference-run provenance disagrees with tracked manifest: {run_id}"
+            )
+        archive_path = str(record.get("archive_path", ""))
+        if (
+            record.get("archive_exists") is not True
+            or Path(archive_path).name != run.archive_filename
+        ):
+            raise RuntimeError(f"reference archive provenance is invalid: {run_id}")
+        archive_paths[archive_path] = (run_id, run.archive_size_bytes)
+    if len(archive_paths) != 9:
+        raise RuntimeError("reference archive provenance paths are not unique")
+
+    server = _read_json(provenance / "server_inventory.json")
+    server_archives = server.get("reference_archives")
+    historical_state = _read_json(provenance / "historical_git_state.json")
+    if (
+        server.get("schema_version") != 1
+        or not isinstance(server_archives, list)
+        or len(server_archives) != 9
+        or server.get("historical_repository", {}).get("path")
+        != historical_state.get("absolute_path")
+    ):
+        raise RuntimeError("server inventory provenance is invalid")
+    server_index = {
+        str(record.get("path")): record for record in server_archives if isinstance(record, dict)
+    }
+    if set(server_index) != set(archive_paths) or len(server_index) != 9:
+        raise RuntimeError("server and reference archive inventories disagree")
+    for path, (_, size_bytes) in archive_paths.items():
+        record = server_index[path]
+        if (
+            record.get("exists") is not True
+            or record.get("kind") != "file"
+            or record.get("size_bytes") != size_bytes
+        ):
+            raise RuntimeError(f"server archive inventory is invalid: {path}")
+
+    visual_manifest = load_visual_manifest(repository / "paper" / "visual_manifest.yaml")
+    provenance_rows: list[dict[str, str]]
+    with (provenance / "paper_artifact_provenance.csv").open(
+        encoding="utf-8", newline=""
+    ) as stream:
+        reader = csv.DictReader(stream)
+        required = {
+            "artifact_type",
+            "artifact_number",
+            "reference_runs",
+            "declared_input",
+            "generator_target",
+        }
+        if set(reader.fieldnames or ()) != required:
+            raise RuntimeError("paper artifact provenance columns are invalid")
+        provenance_rows = list(reader)
+    seen_assets: set[str] = set()
+    seen_rows: set[tuple[str, ...]] = set()
+    for row in provenance_rows:
+        try:
+            asset_id = f"{row['artifact_type']}_{int(row['artifact_number']):02d}"
+        except (KeyError, ValueError) as error:
+            raise RuntimeError("paper artifact provenance contains an invalid row") from error
+        asset = visual_manifest.assets.get(asset_id)
+        if asset is None or row["generator_target"] != asset.tex_target:
+            raise RuntimeError(f"paper artifact provenance target is invalid: {asset_id}")
+        declared_runs = (
+            set() if row["reference_runs"] == "none" else set(row["reference_runs"].split("+"))
+        )
+        if declared_runs != set(asset.run_ids):
+            raise RuntimeError(f"paper artifact provenance run IDs differ: {asset_id}")
+        fingerprint = tuple(row[field] for field in reader.fieldnames or ())
+        if fingerprint in seen_rows:
+            raise RuntimeError("paper artifact provenance contains duplicate rows")
+        seen_rows.add(fingerprint)
+        seen_assets.add(asset_id)
+    if seen_assets != set(visual_manifest.assets):
+        raise RuntimeError("paper artifact provenance does not cover all 28 assets")
+    return {
+        "status": "passed",
+        "reference_run_count": len(indexed),
+        "paper_asset_count": len(seen_assets),
+        "paper_provenance_row_count": len(provenance_rows),
+    }
+
+
+def _write_package_manifest(package: Path) -> dict[str, Any]:
+    records = []
+    for path in sorted(item for item in package.rglob("*") if item.is_file()):
+        records.append(
+            {
+                "path": path.relative_to(package).as_posix(),
+                "sha256": _sha256(path),
+                "size_bytes": path.stat().st_size,
+            }
+        )
+    receipt = {
+        "schema_version": 1,
+        "status": "passed",
+        "file_count": len(records),
+        "files": records,
+    }
+    atomic_json(package / "PACKAGE_MANIFEST.json", receipt)
+    return receipt
+
+
+def _validate_package_manifest(package: Path) -> dict[str, Any]:
+    receipt = _read_json(package / "PACKAGE_MANIFEST.json")
+    records = receipt.get("files")
+    if (
+        receipt.get("status") != "passed"
+        or not isinstance(records, list)
+        or receipt.get("file_count") != len(records)
+    ):
+        raise RuntimeError("package manifest is invalid")
+    expected_paths = {
+        path.relative_to(package).as_posix()
+        for path in package.rglob("*")
+        if path.is_file() and path.name != "PACKAGE_MANIFEST.json"
+    }
+    indexed = {str(record.get("path")): record for record in records if isinstance(record, dict)}
+    if set(indexed) != expected_paths or len(indexed) != len(records):
+        raise RuntimeError("package manifest file inventory differs from payload")
+    for relative_value, record in indexed.items():
+        relative = Path(relative_value)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise RuntimeError("package manifest contains an unsafe path")
+        path = package / relative
+        if path.stat().st_size != record.get("size_bytes") or _sha256(path) != record.get("sha256"):
+            raise RuntimeError(f"packaged file bytes differ from manifest: {relative_value}")
+    return receipt
 
 
 def _require_passed_reports(
@@ -406,6 +567,7 @@ def build_release(
     verification = verification.resolve()
     release_root = release_root.resolve()
     git_info = _git_info(repository)
+    provenance_manifests = _validate_provenance_manifests(provenance, repository)
     analysis, cpu = _require_passed_reports(verification, git_info)
     recovery = _validate_source_snapshot_recovery(provenance)
     snapshots = _validate_source_snapshots(provenance, recovery)
@@ -436,6 +598,8 @@ def build_release(
                 raise FileNotFoundError(f"required verification file is missing: {source}")
             _copy(source, package / "verification" / name)
         atomic_json(package / "GIT_INFO.json", git_info)
+        package_manifest = _write_package_manifest(package)
+        _validate_package_manifest(package)
         _write_zip(package, destination)
 
     digest = _sha256(destination)
@@ -475,6 +639,9 @@ def build_release(
         "source_snapshot_recovery_status": recovery["status"],
         "source_snapshots_verified_count": snapshots["count"],
         "historical_bundle_verification_status": historical_bundle["status"],
+        "reference_provenance_verification_status": provenance_manifests["status"],
+        "paper_provenance_assets_verified_count": provenance_manifests["paper_asset_count"],
+        "packaged_file_count": package_manifest["file_count"] + 1,
         "historical_repository_modified_by_restructure": drift[
             "historical_repository_modified_by_restructure"
         ],

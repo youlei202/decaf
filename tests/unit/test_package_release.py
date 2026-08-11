@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import subprocess
@@ -9,7 +10,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "reproduce" / "package_release.py"
+from decaf.paper.manifest import load_visual_manifest
+from decaf.paper.reference import load_reference_runs
+
+REPOSITORY = Path(__file__).resolve().parents[2]
+SCRIPT = REPOSITORY / "scripts" / "reproduce" / "package_release.py"
 SPEC = spec_from_file_location("decaf_package_release", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 PACKAGE_RELEASE = module_from_spec(SPEC)
@@ -17,8 +22,11 @@ SPEC.loader.exec_module(PACKAGE_RELEASE)
 _archive_repository = PACKAGE_RELEASE._archive_repository
 _require_passed_reports = PACKAGE_RELEASE._require_passed_reports
 _validate_historical_drift = PACKAGE_RELEASE._validate_historical_drift
+_validate_package_manifest = PACKAGE_RELEASE._validate_package_manifest
+_validate_provenance_manifests = PACKAGE_RELEASE._validate_provenance_manifests
 _validate_source_snapshot_recovery = PACKAGE_RELEASE._validate_source_snapshot_recovery
 _validate_source_snapshots = PACKAGE_RELEASE._validate_source_snapshots
+_write_package_manifest = PACKAGE_RELEASE._write_package_manifest
 
 REPOSITORY_IDENTITY = {
     "commit": "a" * 40,
@@ -349,3 +357,107 @@ def test_repository_archive_uses_captured_commit_not_symbolic_head(
     _archive_repository(repository, destination, captured)
 
     assert (destination / "value.txt").read_text(encoding="utf-8") == "captured\n"
+
+
+def test_provenance_manifests_cross_check_tracked_contracts(tmp_path: Path) -> None:
+    tracked_runs = load_reference_runs(REPOSITORY / "manifests/reference_runs")
+    run_records = []
+    server_archives = []
+    for run in tracked_runs.values():
+        archive_path = f"/sealed/{run.archive_filename}"
+        run_records.append(
+            {
+                "id": run.run_id,
+                "family": run.family,
+                "scientific_status": run.scientific_status,
+                "archive_path": archive_path,
+                "archive_exists": True,
+                "archive_sha256": run.archive_sha256,
+                "archive_size_bytes": run.archive_size_bytes,
+                "archive_member_count": run.archive_member_count,
+            }
+        )
+        server_archives.append(
+            {
+                "path": archive_path,
+                "exists": True,
+                "kind": "file",
+                "size_bytes": run.archive_size_bytes,
+            }
+        )
+    (tmp_path / "reference_runs.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "reference_run_count": 9,
+                "all_archives_present": True,
+                "runs": run_records,
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_json(tmp_path / "historical_git_state.json", {"absolute_path": "/historical"})
+    _write_json(
+        tmp_path / "server_inventory.json",
+        {
+            "schema_version": 1,
+            "historical_repository": {"path": "/historical"},
+            "reference_archives": server_archives,
+        },
+    )
+    visual = load_visual_manifest(REPOSITORY / "paper/visual_manifest.yaml")
+    with (tmp_path / "paper_artifact_provenance.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as stream:
+        fieldnames = [
+            "artifact_type",
+            "artifact_number",
+            "reference_runs",
+            "declared_input",
+            "generator_target",
+        ]
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        for asset in visual.assets.values():
+            writer.writerow(
+                {
+                    "artifact_type": asset.kind,
+                    "artifact_number": asset.number,
+                    "reference_runs": "+".join(asset.run_ids) or "none",
+                    "declared_input": (
+                        asset.raw_inputs[0].member if asset.raw_inputs else "paper-only source"
+                    ),
+                    "generator_target": asset.tex_target,
+                }
+            )
+
+    assert _validate_provenance_manifests(tmp_path, REPOSITORY) == {
+        "status": "passed",
+        "reference_run_count": 9,
+        "paper_asset_count": 28,
+        "paper_provenance_row_count": 28,
+    }
+
+    inventory = yaml.safe_load((tmp_path / "reference_runs.yaml").read_text(encoding="utf-8"))
+    inventory["runs"][0]["archive_sha256"] = "0" * 64
+    (tmp_path / "reference_runs.yaml").write_text(
+        yaml.safe_dump(inventory),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="tracked manifest"):
+        _validate_provenance_manifests(tmp_path, REPOSITORY)
+
+
+def test_package_manifest_rejects_payload_tamper(tmp_path: Path) -> None:
+    package = tmp_path / "package"
+    (package / "repository").mkdir(parents=True)
+    payload = package / "repository" / "README.md"
+    payload.write_text("release\n", encoding="utf-8")
+
+    receipt = _write_package_manifest(package)
+
+    assert receipt["file_count"] == 1
+    assert _validate_package_manifest(package)["status"] == "passed"
+    payload.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="bytes differ"):
+        _validate_package_manifest(package)

@@ -1,0 +1,21 @@
+experiment: attribution
+profile: main
+max_workers: 32
+execution:
+  backend: gpu
+  adapter: null
+  requires_gpu: true
+  dataset_root_env: DECAF_DATA_ROOT
+  checkpoint_root_env: DECAF_CACHE_ROOT
+statistics:
+  bootstrap_replicates: 1000
+  bootstrap_seed: 8218
+  endpoint_anchor: decaf_5
+plan:
+  include:
+    - idsds_deletion_targets
+    - idsds_primary
+    - funnybirds_deletion_targets
+    - funnybirds_heldout_targets
+    - funnybirds_primary
+    - funnybirds_supplement

@@ -67,15 +67,17 @@ paper-profile estimates and must not be compared to headline tolerances.
 
 ## Full paper execution
 
-The paper profile expands the sealed plan. Use `--resume` so completed members
-with valid receipts are retained after interruption:
+The paper profile expands the sealed plan. Covertype executes locally, while the
+three image families have explicit accelerator boundaries. A bare
+--stage all --profile paper command is therefore not a portable GPU launcher for
+ImageNet-9 or attribution. Use --resume so completed members with valid receipts
+are retained after interruption.
 
-```bash
-bash scripts/reproduce/controlled.sh --stage all --profile paper --output "$DECAF_RESULTS_ROOT/controlled/paper" --resume
-bash scripts/reproduce/imagenet9.sh --stage all --profile paper --output "$DECAF_RESULTS_ROOT/imagenet9/paper" --resume
-bash scripts/reproduce/attribution.sh --stage all --profile paper --output "$DECAF_RESULTS_ROOT/attribution/paper" --resume
+The directly executable Covertype command is:
+
+~~~bash
 bash scripts/reproduce/covertype.sh --stage all --profile paper --output "$DECAF_RESULTS_ROOT/covertype/paper" --resume
-```
+~~~
 
 Controlled paper compute is a deliberately explicit accelerator boundary. Its
 `prepare` stage verifies the Shapes3D bytes and all C0, C1, and C2 checkpoint
@@ -85,6 +87,13 @@ stage does not launch GPU work on a CPU host. It ingests the bundle named by
 registered artifact SHA-256 digests, and a 14-file analysis manifest. The
 producer declares the accelerator execution class; this loader verifies byte
 identity and lineage without claiming an independent GPU rerun.
+
+After setting DECAF_CONTROLLED_GPU_OUTPUT_ROOT, the Controlled ingestion and
+analysis command is:
+
+~~~bash
+bash scripts/reproduce/controlled.sh --stage all --profile paper --output "$DECAF_RESULTS_ROOT/controlled/paper" --resume
+~~~
 
 The accelerator bundle contract is machine-readable. `manifests/members.json`
 uses `schema_version: 2`, `kind: controlled_members`, and
@@ -104,6 +113,74 @@ JSON is rejected.
 `analysis/C1`, and `analysis/C2` files consumed by the frozen schema adapters.
 Completed member receipts repeat the member-spec and run bindings, so resume is
 allowed only while every local artifact still matches its registered bytes.
+
+### ImageNet-9 external worker boundary
+
+ImageNet-9 preparation writes the exact 1,296-job schedule, split manifests,
+checkpoint registry, and worker contract:
+
+~~~bash
+I9_RUN="$DECAF_RESULTS_ROOT/imagenet9/paper"
+bash scripts/reproduce/imagenet9.sh --stage prepare --profile paper --output "$I9_RUN"
+~~~
+
+An external, licensed GPU worker must then consume
+$I9_RUN/manifests/jobs.jsonl in dependency order and write every job's declared
+output and receipt beneath that same run directory. The repository does not ship
+or claim execution of that deployment-specific worker. The exact Parquet
+columns and receipt fields are embedded under worker_contract in
+manifests/plan.json and documented in docs/result_schema.md. Once all outputs
+exist, the public code validates their support, grids, dependency hashes, row
+counts, and receipts before it aggregates them:
+
+~~~bash
+bash scripts/reproduce/imagenet9.sh --stage compute --profile paper --output "$I9_RUN" --resume
+bash scripts/reproduce/imagenet9.sh --stage analyze --profile paper --output "$I9_RUN" --resume
+bash scripts/reproduce/imagenet9.sh --stage paper --profile paper --output "$I9_RUN" --resume
+~~~
+
+Until that external worker is run on provisioned GPUs, ImageNet-9 real-shard
+verification remains pending by design.
+
+### Attribution adapter boundary
+
+Formal attribution compute requires a user-supplied GPU adapter and explicit
+data/checkpoint byte bindings. Copy configs/attribution/paper.yaml outside the
+repository and set:
+
+~~~yaml
+execution:
+  backend: gpu
+  adapter: your_package.your_module:evaluate_member
+  requires_gpu: true
+  dataset_root_env: DECAF_DATA_ROOT
+  checkpoint_root_env: DECAF_CACHE_ROOT
+  dataset_manifests:
+    scope_name: relative/or/absolute/manifest.json
+  checkpoint_files:
+    checkpoint_id: relative/or/absolute/checkpoint.bin
+~~~
+
+Every formal scope and checkpoint ID printed by --plan-only must be bound.
+Relative paths resolve beneath the named environment root. Each dataset
+manifest must match the SHA-256 frozen in the plan; checkpoint bytes are hashed
+at runtime. The adapter callable has signature
+(job: Mapping[str, Any], context: RunContext) -> pandas.DataFrame; its exact
+per-kind frame contract is documented in docs/result_schema.md.
+
+~~~bash
+ATTR_CONFIG=/path/to/attribution-paper-gpu.yaml
+ATTR_RUN="$DECAF_RESULTS_ROOT/attribution/paper"
+bash scripts/reproduce/attribution.sh --stage prepare --profile paper --config "$ATTR_CONFIG" --output "$ATTR_RUN"
+bash scripts/reproduce/attribution.sh --stage compute --profile paper --config "$ATTR_CONFIG" --output "$ATTR_RUN" --resume
+bash scripts/reproduce/attribution.sh --stage analyze --profile paper --config "$ATTR_CONFIG" --output "$ATTR_RUN" --resume
+bash scripts/reproduce/attribution.sh --stage paper --profile paper --config "$ATTR_CONFIG" --output "$ATTR_RUN" --resume
+~~~
+
+The checked-in formal configs deliberately keep adapter: null. They support
+sealed analysis replay and static planning, but formal compute fails closed
+until the operator supplies the adapter and bindings. Attribution GPU
+real-shard verification remains pending by design.
 
 Before allocating hardware, inspect the exact static plan without executing it:
 

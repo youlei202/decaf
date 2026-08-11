@@ -1,0 +1,17 @@
+experiment: attribution
+profile: large-model
+max_workers: 32
+execution:
+  backend: gpu
+  adapter: null
+  requires_gpu: true
+  dataset_root_env: DECAF_DATA_ROOT
+  checkpoint_root_env: DECAF_CACHE_ROOT
+statistics:
+  bootstrap_replicates: 1000
+  bootstrap_seed: 8218
+  endpoint_anchor: decaf_5
+plan:
+  include:
+    - dinov2_g_quality
+    - dinov2_g_timing

@@ -42,6 +42,10 @@ def test_missing_conceptual_source_is_explicit() -> None:
     assert figure.raw_inputs == ()
     assert figure.source_note
     assert figure.generation_contract["status"] == "source_missing"
+    assert figure.generation_contract["missing_item"]
+    assert figure.generation_contract["why_it_matters"]
+    assert figure.generation_contract["reproducible_scope"]
+    assert figure.generation_contract["required_recovery_action"]
     assert figure.headline_assertions == ()
     assert figure.tex_target.endswith("figure_01.tex")
 

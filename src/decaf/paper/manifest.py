@@ -15,6 +15,14 @@ class ManifestError(ValueError):
     """Raised when a paper manifest is incomplete or internally inconsistent."""
 
 
+SOURCE_MISSING_CONTRACT_FIELDS = (
+    "missing_item",
+    "why_it_matters",
+    "reproducible_scope",
+    "required_recovery_action",
+)
+
+
 @dataclass(frozen=True)
 class RawInput:
     """One machine-readable member of a sealed reference archive."""
@@ -135,6 +143,16 @@ def load_visual_manifest(path: str | Path) -> VisualManifest:
             )
         if status == "source_missing" and inputs:
             raise ManifestError(f"{asset_id} is source_missing but declares raw inputs")
+        if status == "source_missing":
+            missing_gap_fields = [
+                field
+                for field in SOURCE_MISSING_CONTRACT_FIELDS
+                if not str(contract.get(field, "")).strip()
+            ]
+            if missing_gap_fields:
+                raise ManifestError(
+                    f"{asset_id} source-missing contract omits {', '.join(missing_gap_fields)}"
+                )
         if status != "source_missing" and not inputs:
             raise ManifestError(f"{asset_id} must declare at least one machine-readable input")
         assets[asset_id] = VisualAsset(

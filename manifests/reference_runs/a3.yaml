@@ -8,7 +8,13 @@ archive:
   size_bytes: 67051747
   member_count: 25
 analysis_inputs:
+  - code/endpoint_m.py
+  - endpoint_m/bootstrap_with_m.parquet
+  - endpoint_m/idsds_endpoint_target_alignment.json
   - endpoint_m/method_results_with_m.csv
   - endpoint_m/pairwise_differences_with_m.csv
+  - endpoint_m/per_model_long_with_m.csv
   - endpoint_m/per_model_with_m.csv
   - endpoint_m/full50k_with_m.csv
+  - endpoint_m/source_audit.csv
+  - manifests/strict_common_support.parquet

@@ -8,6 +8,13 @@ archive:
   size_bytes: 5648320
   member_count: 112
 analysis_inputs:
+  - common_support/common_support_bootstrap.parquet
+  - common_support/common_support_coverage.csv
   - common_support/common_support_method_summary.csv
+  - common_support/common_support_pairwise_differences.csv
+  - common_support/funnybirds_common_support_manifest.parquet
+  - common_support/partimagenet_common_support_manifest.parquet
+  - dinov2_g_timing/dinov2_g_exact_ratios.json
   - dinov2_g_timing/dinov2_g_quality_timing_join.csv
+  - dinov2_g_timing/dinov2_g_timing_raw.csv
   - dinov2_g_timing/dinov2_g_timing_summary.csv

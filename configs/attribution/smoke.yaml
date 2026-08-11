@@ -1,0 +1,16 @@
+experiment: attribution
+profile: smoke
+max_workers: 1
+execution:
+  backend: oracle
+  adapter: null
+  requires_gpu: false
+  dataset_root_env: DECAF_DATA_ROOT
+  checkpoint_root_env: DECAF_CACHE_ROOT
+statistics:
+  bootstrap_replicates: 200
+  bootstrap_seed: 8218
+  endpoint_anchor: decaf_5
+plan:
+  include:
+    - oracle

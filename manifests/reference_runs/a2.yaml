@@ -12,4 +12,9 @@ analysis_inputs:
   - results/compute/timing_summary.csv
   - results/compute/memory_summary.csv
   - results/compute/query_counts.csv
+  - results/funnybirds/reused_quality.parquet
+  - results/funnybirds/supplement_results.parquet
+  - results/imagenet/deletion_targets.parquet
   - results/imagenet/full50k_scale_check.csv
+  - results/imagenet/per_image_idsds.parquet
+  - results/manifests/strict_common_support.parquet

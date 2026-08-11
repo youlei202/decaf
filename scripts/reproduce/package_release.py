@@ -16,12 +16,14 @@ from pathlib import Path
 from typing import Any
 
 from decaf.experiments.common import atomic_json, atomic_text
+from decaf.paper.manifest import load_visual_manifest
 
 PROVENANCE_FILES = (
     "historical_git_state.json",
     "paper_artifact_provenance.csv",
     "reference_runs.yaml",
     "server_inventory.json",
+    "source_snapshot_recovery.json",
     "source_snapshots.yaml",
 )
 VERIFICATION_FILES = (
@@ -80,7 +82,78 @@ def _require_passed_reports(verification: Path) -> tuple[dict[str, Any], dict[st
         raise RuntimeError("the release does not regenerate all 12 figures")
     if analysis.get("tables_regenerated") != 16:
         raise RuntimeError("the release does not regenerate all 16 tables")
+    steps = cpu.get("steps")
+    if not isinstance(steps, dict):
+        raise RuntimeError("all-cpu verification has no structured steps")
+    for name in (
+        "quality",
+        "analysis_replay",
+        "unit",
+        "integration_cpu",
+        "full_plan",
+        "repository_audit",
+    ):
+        if not isinstance(steps.get(name), dict):
+            raise RuntimeError(f"all-cpu verification omits the {name} step")
+    if steps["quality"].get("status") != "passed":
+        raise RuntimeError("quality gates have not passed")
+    if steps["analysis_replay"].get("status") != "passed":
+        raise RuntimeError("embedded analysis replay has not passed")
+    if steps["unit"].get("status") != "passed":
+        raise RuntimeError("unit/regression tests have not passed")
+    if steps["integration_cpu"].get("status") != "passed":
+        raise RuntimeError("CPU integration tests have not passed")
+    full_plan = steps["full_plan"]
+    if full_plan.get("status") != "passed":
+        raise RuntimeError("static full-plan verification has not passed")
+    if steps["repository_audit"].get("passed") is not True:
+        raise RuntimeError("embedded repository audit has not passed")
+    families = full_plan.get("families")
+    if not isinstance(families, dict):
+        raise RuntimeError("static full-plan report has no family records")
+    for family in ("controlled", "imagenet9", "attribution", "covertype"):
+        if not isinstance(families.get(family), dict):
+            raise RuntimeError(f"static full-plan report omits {family}")
+        if families[family].get("status") != "passed":
+            raise RuntimeError(f"{family} static full-plan verification has not passed")
     return analysis, cpu
+
+
+def _validate_source_snapshot_recovery(provenance: Path) -> dict[str, Any]:
+    receipt = _read_json(provenance / "source_snapshot_recovery.json")
+    if receipt.get("status") != "repaired_and_verified":
+        raise RuntimeError("source snapshot recovery is not verified")
+    snapshots = receipt.get("snapshots")
+    if not isinstance(snapshots, dict) or len(snapshots) != 5:
+        raise RuntimeError("source snapshot recovery must cover exactly five snapshots")
+    for name, record in snapshots.items():
+        if not isinstance(record, dict) or record.get("repaired_sha256_match") is not True:
+            raise RuntimeError(f"source snapshot recovery is unverified for {name}")
+        if record.get("current_source_byte_compare", {}).get("status") != "passed":
+            raise RuntimeError(f"source snapshot payload comparison failed for {name}")
+    return receipt
+
+
+def _validate_historical_drift(path: Path) -> dict[str, Any]:
+    drift = _read_json(path)
+    if drift.get("status") not in {"unchanged", "documented_external_drift"}:
+        raise RuntimeError("historical repository drift is not safely classified")
+    if drift.get("historical_repository_modified_by_restructure") is not False:
+        raise RuntimeError("historical repository has restructuring-owned writes")
+    if drift.get("head_unchanged") is not True:
+        raise RuntimeError("historical repository HEAD changed after freeze")
+    if drift.get("tracked_diff", {}).get("unchanged") is not True:
+        raise RuntimeError("historical repository tracked diff changed after freeze")
+    if drift.get("staged_diff", {}).get("unchanged") is not True:
+        raise RuntimeError("historical repository staged diff changed after freeze")
+    if drift.get("external_drift_detected") is True:
+        if drift.get("status") != "documented_external_drift":
+            raise RuntimeError("external historical drift is not documented")
+        if drift.get("only_additional_untracked_paths") is not True:
+            raise RuntimeError("external historical drift is broader than additive files")
+        if not drift.get("added_untracked_files"):
+            raise RuntimeError("external historical drift has no file evidence")
+    return drift
 
 
 def _git_info(repository: Path) -> dict[str, Any]:
@@ -137,13 +210,15 @@ def build_release(
     provenance: Path,
     verification: Path,
     release_root: Path,
-    historical_drift: Path | None,
+    historical_drift: Path,
 ) -> dict[str, Any]:
     repository = repository.resolve()
     provenance = provenance.resolve()
     verification = verification.resolve()
     release_root = release_root.resolve()
     analysis, cpu = _require_passed_reports(verification)
+    recovery = _validate_source_snapshot_recovery(provenance)
+    drift = _validate_historical_drift(historical_drift.resolve())
     git_info = _git_info(repository)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     basename = f"decaf_reproducibility_release_v1_{timestamp}"
@@ -158,10 +233,12 @@ def build_release(
             if not source.is_file():
                 raise FileNotFoundError(f"required provenance file is missing: {source}")
             _copy(source, package / "provenance" / name)
-        if historical_drift is not None:
-            if not historical_drift.is_file():
-                raise FileNotFoundError(historical_drift)
-            _copy(historical_drift, package / "provenance" / historical_drift.name)
+        if not historical_drift.is_file():
+            raise FileNotFoundError(historical_drift)
+        _copy(
+            historical_drift,
+            package / "provenance" / "historical_repository_external_drift.json",
+        )
         for name in VERIFICATION_FILES:
             source = verification / name
             if not source.is_file():
@@ -174,6 +251,22 @@ def build_release(
     atomic_text(destination.with_suffix(".zip.sha256"), f"{digest}  {destination.name}\n")
     steps = cpu.get("steps", {})
     source_missing = analysis.get("source_missing_recorded", [])
+    visual_manifest = load_visual_manifest(repository / "paper" / "visual_manifest.yaml")
+    source_gap_records = []
+    for asset in visual_manifest.assets.values():
+        if asset.status != "source_missing":
+            continue
+        source_gap_records.append(
+            {
+                "asset_id": asset.asset_id,
+                "missing_item": asset.generation_contract["missing_item"],
+                "why_it_matters": asset.generation_contract["why_it_matters"],
+                "what_remains_reproducible": asset.generation_contract["reproducible_scope"],
+                "required_action": asset.generation_contract["required_recovery_action"],
+            }
+        )
+    if sorted(source_missing) != sorted(record["asset_id"] for record in source_gap_records):
+        raise RuntimeError("analysis and visual-manifest source gaps disagree")
     status = {
         "schema_version": 1,
         "status": ("completed_with_documented_historical_gap" if source_missing else "completed"),
@@ -184,13 +277,17 @@ def build_release(
         "figures_regenerated_count": analysis["figures_regenerated"],
         "tables_regenerated_count": analysis["tables_regenerated"],
         "cpu_tests_status": cpu["status"],
+        "quality_status": steps.get("quality", {}).get("status"),
         "static_plan_status": steps.get("full_plan", {}).get("status"),
         "gpu_verification_pending": True,
-        "historical_source_gaps": source_missing,
-        "historical_repository_modified_by_restructure": False,
-        "historical_repository_external_drift_manifest": (
-            str(historical_drift.resolve()) if historical_drift is not None else None
-        ),
+        "historical_source_gaps": source_gap_records,
+        "source_snapshot_recovery_status": recovery["status"],
+        "historical_repository_modified_by_restructure": drift[
+            "historical_repository_modified_by_restructure"
+        ],
+        "historical_repository_external_drift_detected": drift["external_drift_detected"],
+        "historical_repository_external_drift_attribution": drift.get("attribution"),
+        "historical_repository_external_drift_manifest": str(historical_drift.resolve()),
         "final_zip_path": str(destination),
         "sha256": digest,
     }
@@ -205,7 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provenance", type=Path, required=True)
     parser.add_argument("--verification", type=Path, required=True)
     parser.add_argument("--release-root", type=Path, required=True)
-    parser.add_argument("--historical-drift", type=Path)
+    parser.add_argument("--historical-drift", type=Path, required=True)
     return parser
 
 

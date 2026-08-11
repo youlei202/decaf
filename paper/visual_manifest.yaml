@@ -9,10 +9,14 @@ assets:
     generator: decaf.paper.render.render_source_missing_asset
     tex_target: paper/generated/figures/figure_01.tex
     status: source_missing
-    source_note: The original paper-only TikZ coordinates were not present in the sealed sources.
+    source_note: The original paper-only TikZ source and layout coordinates were not present in the historical repository, sealed reference archives, or frozen source snapshots.
     generation_contract:
       status: source_missing
-      operation: Recover the original conceptual layout and coordinates.
+      operation: Render an explicit provenance placeholder; do not fabricate the conceptual diagram.
+      missing_item: Original Figure 1 TikZ source, node geometry, labels, and layout coordinates.
+      why_it_matters: Without the authoring source, the published conceptual layout cannot be regenerated or compared exactly.
+      reproducible_scope: All nine sealed runs, all numerical headline assertions, Figures 2-12, and Tables 1-16 remain independently replayable; Figure 1 has no numerical dependency.
+      required_recovery_action: Obtain the original Figure 1 TikZ source from the paper authors, freeze it with a content hash, replace this placeholder generator, and add an exact rendered-artifact comparison.
     headline_assertions: []
   figure_02:
     kind: figure

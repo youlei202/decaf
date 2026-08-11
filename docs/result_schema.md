@@ -82,6 +82,41 @@ the run `failed`; missing required terminal receipts make it `partial`; all
 required members plus failed optional members yield
 `completed_with_optional_failures`; otherwise the result is `completed`.
 
+## ImageNet-9 external GPU members
+
+The paper-profile prepare stage writes manifests/jobs.jsonl and repeats the
+worker contract in manifests/plan.json. The external worker writes only to each
+job's declared run-relative output and receipt paths. Scan output is Parquet
+with pair_id, pair_type, model_id, reveal_path, stage_index, alpha, and response.
+Baseline output is Parquet with pair_id, pair_type, model_id, method_id, and
+score.
+
+Every receipt contains schema_version, job_id, the canonical job_sha256,
+terminal status=completed, output, output_sha256, row_count, and the exact
+ordered dependency_artifacts list. Compute rejects missing or extra pair
+support, a changed alpha/stage grid, wrong model or method identity, row-count
+drift, dependency-output drift, and receipt/output hash mismatches. The public
+compute stage validates and aggregates these materialized files; it does not
+execute the external GPU worker.
+
+## Attribution GPU adapter
+
+The formal adapter is loaded lazily from
+execution.adapter=module:function and has signature
+(job: Mapping[str, Any], context: RunContext) -> pandas.DataFrame. Image-member
+frames cover the exact ordered image_index interval, contain unique image_id,
+and repeat the planned scope, dataset, model, and method. Target jobs add finite
+target_effects; quality jobs add finite patch_scores, decaf_M, spearman, and
+finite_complete. Jobs without target dependencies also provide their endpoint
+or quality-target vectors. Timing jobs return exactly one row with the planned
+repeat and four nonnegative timing measurements.
+
+The framework attaches plan, data-manifest, checkpoint-byte, input-contract, and
+dependency-output hashes; validates the resulting frame; writes Parquet
+atomically; and creates the terminal receipt. Resume revalidates every one of
+those bindings before skipping a member. The adapter must not forge lineage
+columns itself.
+
 ## Portable tables
 
 Canonical raw response tables include the identifiers needed to reconstruct a

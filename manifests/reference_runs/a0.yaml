@@ -11,3 +11,4 @@ analysis_inputs:
   - formal/formal_method_summary.csv
   - formal/heldout_quality.parquet
   - formal/part_attribution.parquet
+  - formal/decaf_components.parquet

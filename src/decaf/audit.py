@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import os
+import subprocess
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -43,13 +45,43 @@ def _prompt_prefixes() -> tuple[str, ...]:
 
 
 def iter_public_files(root: Path) -> Iterable[Path]:
-    """Yield release files while pruning repositories, environments, and output."""
+    """Yield tracked files plus non-generated, non-cache repository files."""
 
-    for path in sorted(root.rglob("*")):
-        if any(part in SKIP_DIRECTORIES for part in path.relative_to(root).parts):
+    resolved = root.resolve()
+    tracked: set[Path] = set()
+    try:
+        top_level = subprocess.run(
+            ("git", "-C", str(resolved), "rev-parse", "--show-toplevel"),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if Path(top_level).resolve() == resolved:
+            output = subprocess.run(
+                ("git", "-C", str(resolved), "ls-files", "-z"),
+                check=True,
+                capture_output=True,
+            ).stdout
+            for value in output.split(b"\0"):
+                if not value:
+                    continue
+                path = resolved / value.decode("utf-8", errors="surrogateescape")
+                if path.is_file():
+                    tracked.add(path)
+    except (OSError, subprocess.CalledProcessError):
+        pass
+
+    files = set(tracked)
+    for directory, directory_names, file_names in os.walk(resolved):
+        directory_path = Path(directory)
+        relative_parts = directory_path.relative_to(resolved).parts
+        if any(part in SKIP_DIRECTORIES for part in relative_parts):
+            directory_names.clear()
             continue
-        if path.is_file():
-            yield path
+        directory_names[:] = [name for name in directory_names if name not in SKIP_DIRECTORIES]
+        files.update(directory_path / name for name in file_names)
+
+    yield from sorted(files, key=lambda path: path.relative_to(resolved).as_posix())
 
 
 def _relative(path: Path, root: Path) -> str:
@@ -98,8 +130,7 @@ def _duplicate_equation_findings(path: Path, root: Path) -> list[AuditFinding]:
             f"defines reserved core function {node.name!r}",
         )
         for node in ast.walk(tree)
-        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
-        and node.name in equation_names
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name in equation_names
     ]
 
 

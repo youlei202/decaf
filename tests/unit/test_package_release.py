@@ -1,23 +1,42 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
+import yaml
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "reproduce" / "package_release.py"
 SPEC = spec_from_file_location("decaf_package_release", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 PACKAGE_RELEASE = module_from_spec(SPEC)
 SPEC.loader.exec_module(PACKAGE_RELEASE)
+_archive_repository = PACKAGE_RELEASE._archive_repository
 _require_passed_reports = PACKAGE_RELEASE._require_passed_reports
 _validate_historical_drift = PACKAGE_RELEASE._validate_historical_drift
 _validate_source_snapshot_recovery = PACKAGE_RELEASE._validate_source_snapshot_recovery
+_validate_source_snapshots = PACKAGE_RELEASE._validate_source_snapshots
+
+REPOSITORY_IDENTITY = {
+    "commit": "a" * 40,
+    "tree": "b" * 40,
+    "tracked_worktree_clean": True,
+}
 
 
 def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _git(repository: Path, *arguments: str) -> bytes:
+    return subprocess.run(
+        ("git", "-C", str(repository), *arguments),
+        check=True,
+        capture_output=True,
+    ).stdout
 
 
 def _passed_steps() -> dict[str, object]:
@@ -35,23 +54,34 @@ def _passed_steps() -> dict[str, object]:
     }
 
 
+def _bound_report(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        **payload,
+        "repository_commit": REPOSITORY_IDENTITY["commit"],
+        "repository_tree": REPOSITORY_IDENTITY["tree"],
+        "tracked_worktree_clean": True,
+    }
+
+
 def test_release_reports_require_every_structured_gate(tmp_path: Path) -> None:
     _write_json(
         tmp_path / "analysis_replay.json",
-        {
-            "status": "passed",
-            "reference_runs_verified": 9,
-            "figures_regenerated": 12,
-            "tables_regenerated": 16,
-        },
+        _bound_report(
+            {
+                "status": "passed",
+                "reference_runs_verified": 9,
+                "figures_regenerated": 12,
+                "tables_regenerated": 16,
+            }
+        ),
     )
     _write_json(
         tmp_path / "cpu_verification.json",
-        {"status": "passed", "mode": "all-cpu", "steps": _passed_steps()},
+        _bound_report({"status": "passed", "mode": "all-cpu", "steps": _passed_steps()}),
     )
     _write_json(tmp_path / "repository_audit.json", {"passed": True})
 
-    analysis, cpu = _require_passed_reports(tmp_path)
+    analysis, cpu = _require_passed_reports(tmp_path, REPOSITORY_IDENTITY)
 
     assert analysis["reference_runs_verified"] == 9
     assert cpu["steps"]["quality"]["status"] == "passed"
@@ -66,55 +96,256 @@ def test_release_reports_fail_when_a_family_plan_is_absent(tmp_path: Path) -> No
     del families["attribution"]
     _write_json(
         tmp_path / "analysis_replay.json",
-        {
-            "status": "passed",
-            "reference_runs_verified": 9,
-            "figures_regenerated": 12,
-            "tables_regenerated": 16,
-        },
+        _bound_report(
+            {
+                "status": "passed",
+                "reference_runs_verified": 9,
+                "figures_regenerated": 12,
+                "tables_regenerated": 16,
+            }
+        ),
     )
     _write_json(
         tmp_path / "cpu_verification.json",
-        {"status": "passed", "mode": "all-cpu", "steps": steps},
+        _bound_report({"status": "passed", "mode": "all-cpu", "steps": steps}),
     )
     _write_json(tmp_path / "repository_audit.json", {"passed": True})
 
     with pytest.raises(RuntimeError, match="omits attribution"):
-        _require_passed_reports(tmp_path)
+        _require_passed_reports(tmp_path, REPOSITORY_IDENTITY)
 
 
-def test_drift_and_snapshot_recovery_receipts_fail_closed(tmp_path: Path) -> None:
+def test_release_reports_reject_a_stale_repository_identity(tmp_path: Path) -> None:
+    _write_json(
+        tmp_path / "analysis_replay.json",
+        _bound_report(
+            {
+                "status": "passed",
+                "reference_runs_verified": 9,
+                "figures_regenerated": 12,
+                "tables_regenerated": 16,
+            }
+        ),
+    )
+    stale_cpu = _bound_report({"status": "passed", "mode": "all-cpu", "steps": _passed_steps()})
+    stale_cpu["repository_commit"] = "c" * 40
+    _write_json(tmp_path / "cpu_verification.json", stale_cpu)
+    _write_json(tmp_path / "repository_audit.json", {"passed": True})
+
+    with pytest.raises(RuntimeError, match="CPU verification.*packaged commit"):
+        _require_passed_reports(tmp_path, REPOSITORY_IDENTITY)
+
+
+def test_drift_receipt_recomputes_live_tree_and_rejects_tamper(
+    tmp_path: Path,
+) -> None:
+    historical = tmp_path / "historical"
+    historical.mkdir()
+    _git(historical, "init", "-q")
+    (historical / "tracked.txt").write_text("frozen\n", encoding="utf-8")
+    _git(historical, "add", "tracked.txt")
+    _git(
+        historical,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "initial",
+    )
+    frozen_status = _git(historical, "status", "--porcelain=v1", "--untracked-files=all")
+    frozen_tracked = _git(historical, "diff", "--no-ext-diff", "--binary")
+    frozen_staged = _git(historical, "diff", "--cached", "--no-ext-diff", "--binary")
+    frozen_head = _git(historical, "rev-parse", "HEAD").decode().strip()
+    frozen_fingerprint = hashlib.sha256(
+        frozen_status + b"\0" + frozen_tracked + b"\0" + frozen_staged
+    ).hexdigest()
+    _write_json(
+        tmp_path / "historical_git_state.json",
+        {
+            "absolute_path": str(historical),
+            "captured_at": "2026-01-01T00:00:00+00:00",
+            "working_tree_fingerprint": frozen_fingerprint,
+            "records": {
+                "head": {"stdout": frozen_head + "\n"},
+                "status_porcelain": {"stdout": frozen_status.decode()},
+                "diff": {"stdout": frozen_tracked.decode()},
+                "diff_staged": {"stdout": frozen_staged.decode()},
+            },
+        },
+    )
+
+    external = historical / "external.txt"
+    external.write_text("external\n", encoding="utf-8")
+    current_status = _git(historical, "status", "--porcelain=v1", "--untracked-files=all")
+    current_tracked = _git(historical, "diff", "--no-ext-diff", "--binary")
+    current_staged = _git(historical, "diff", "--cached", "--no-ext-diff", "--binary")
+    current_fingerprint = hashlib.sha256(
+        current_status + b"\0" + current_tracked + b"\0" + current_staged
+    ).hexdigest()
+    empty_sha = hashlib.sha256(b"").hexdigest()
     drift_path = tmp_path / "drift.json"
     _write_json(
         drift_path,
         {
             "status": "documented_external_drift",
+            "historical_repository": str(historical),
             "historical_repository_modified_by_restructure": False,
             "head_unchanged": True,
-            "tracked_diff": {"unchanged": True},
-            "staged_diff": {"unchanged": True},
+            "frozen_head": frozen_head,
+            "current_head": frozen_head,
+            "frozen_working_tree_fingerprint": frozen_fingerprint,
+            "current_working_tree_fingerprint": current_fingerprint,
+            "tracked_diff": {
+                "unchanged": True,
+                "frozen_sha256": empty_sha,
+                "current_sha256": empty_sha,
+                "current_size_bytes": 0,
+            },
+            "staged_diff": {
+                "unchanged": True,
+                "frozen_sha256": empty_sha,
+                "current_sha256": empty_sha,
+                "current_size_bytes": 0,
+            },
             "external_drift_detected": True,
             "only_additional_untracked_paths": True,
-            "added_untracked_files": [{"path": "external.txt"}],
+            "initial_status_line_count": 0,
+            "current_status_line_count": 1,
+            "added_status_lines": ["?? external.txt"],
+            "removed_status_lines": [],
+            "added_untracked_files": [
+                {
+                    "path": "external.txt",
+                    "size_bytes": external.stat().st_size,
+                    "sha256": hashlib.sha256(external.read_bytes()).hexdigest(),
+                }
+            ],
         },
     )
+
+    def forge_current_observation() -> None:
+        report = json.loads(drift_path.read_text(encoding="utf-8"))
+        live_status = _git(historical, "status", "--porcelain=v1", "--untracked-files=all")
+        live_tracked = _git(historical, "diff", "--no-ext-diff", "--binary")
+        live_staged = _git(historical, "diff", "--cached", "--no-ext-diff", "--binary")
+        live_lines = live_status.decode().splitlines()
+        report["current_head"] = _git(historical, "rev-parse", "HEAD").decode().strip()
+        report["current_working_tree_fingerprint"] = hashlib.sha256(
+            live_status + b"\0" + live_tracked + b"\0" + live_staged
+        ).hexdigest()
+        report["current_status_line_count"] = len(live_lines)
+        report["added_status_lines"] = sorted(set(live_lines))
+        report["removed_status_lines"] = []
+        report["tracked_diff"]["current_sha256"] = hashlib.sha256(live_tracked).hexdigest()
+        report["tracked_diff"]["current_size_bytes"] = len(live_tracked)
+        report["staged_diff"]["current_sha256"] = hashlib.sha256(live_staged).hexdigest()
+        report["staged_diff"]["current_size_bytes"] = len(live_staged)
+        _write_json(drift_path, report)
+
+    assert _validate_historical_drift(drift_path, tmp_path)["external_drift_detected"] is True
+    external.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="added-file bytes"):
+        _validate_historical_drift(drift_path, tmp_path)
+    external.write_text("external\n", encoding="utf-8")
+
+    (historical / "tracked.txt").write_text("changed\n", encoding="utf-8")
+    forge_current_observation()
+    with pytest.raises(RuntimeError, match="live tracked diff differs"):
+        _validate_historical_drift(drift_path, tmp_path)
+
+    (historical / "tracked.txt").write_text("frozen\n", encoding="utf-8")
+    _git(
+        historical,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-qm",
+        "unexpected head",
+    )
+    forge_current_observation()
+    with pytest.raises(RuntimeError, match="live HEAD differs"):
+        _validate_historical_drift(drift_path, tmp_path)
+
+
+def test_snapshot_recovery_receipt_verifies_live_archives(tmp_path: Path) -> None:
     recovery_records = {
         name: {
             "repaired_sha256_match": True,
             "current_source_byte_compare": {"status": "passed"},
         }
-        for name in ("controlled", "endpoint", "imagenet9", "attribution", "covertype")
+        for name in (
+            "controlled",
+            "endpoint_behavior_v1",
+            "imagenet9",
+            "attribution",
+            "covertype",
+        )
     }
+    snapshot_manifest = {"schema_version": 1, "snapshots": {}}
+    for name, recovery in recovery_records.items():
+        path = tmp_path / f"{name}.tar.gz"
+        path.write_bytes(f"snapshot:{name}".encode())
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        recovery["repaired_sha256"] = digest
+        recovery["size_bytes"] = path.stat().st_size
+        snapshot_manifest["snapshots"][name] = {
+            "path": str(path),
+            "sha256": digest,
+            "size_bytes": path.stat().st_size,
+        }
     _write_json(
         tmp_path / "source_snapshot_recovery.json",
         {"status": "repaired_and_verified", "snapshots": recovery_records},
     )
+    (tmp_path / "source_snapshots.yaml").write_text(
+        yaml.safe_dump(snapshot_manifest),
+        encoding="utf-8",
+    )
 
-    assert _validate_historical_drift(drift_path)["external_drift_detected"] is True
-    assert _validate_source_snapshot_recovery(tmp_path)["status"] == "repaired_and_verified"
+    recovery = _validate_source_snapshot_recovery(tmp_path)
+    assert recovery["status"] == "repaired_and_verified"
+    assert _validate_source_snapshots(tmp_path, recovery)["count"] == 5
 
-    drift = json.loads(drift_path.read_text(encoding="utf-8"))
-    drift["tracked_diff"]["unchanged"] = False
-    _write_json(drift_path, drift)
-    with pytest.raises(RuntimeError, match="tracked diff"):
-        _validate_historical_drift(drift_path)
+
+def test_repository_archive_uses_captured_commit_not_symbolic_head(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "-q")
+    source = repository / "value.txt"
+    source.write_text("captured\n", encoding="utf-8")
+    _git(repository, "add", "value.txt")
+    _git(
+        repository,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "captured",
+    )
+    captured = _git(repository, "rev-parse", "HEAD").decode().strip()
+    source.write_text("later\n", encoding="utf-8")
+    _git(repository, "add", "value.txt")
+    _git(
+        repository,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "later",
+    )
+
+    destination = tmp_path / "archive"
+    _archive_repository(repository, destination, captured)
+
+    assert (destination / "value.txt").read_text(encoding="utf-8") == "captured\n"

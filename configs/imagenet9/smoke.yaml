@@ -1,0 +1,38 @@
+schema_version: 1
+experiment: imagenet9
+profile: smoke
+max_workers: 2
+data:
+  root_environment: DECAF_DATA_ROOT
+  dataset_subdirectory: imagenet9
+  input_size: 8
+  paired_variant_rows: 4
+  score_pairs: 4
+  deep_pairs: 4
+  shard_size: 4
+  required_variants: [original, mixed_same, mixed_rand, mixed_next, only_fg]
+  paired_manifest_sha256: smoke-fixture
+  score_split_sha256: smoke-fixture
+  deep_split_sha256: smoke-fixture
+experiment_grid:
+  pair_types: [same_rand]
+  reveal_paths: [blend, patch_A]
+  alpha: [0.0, 0.5, 1.0]
+  epsilon: 0.02
+models:
+  torchvision: [[resnet18, IMAGENET1K_V1]]
+  timm: []
+  finetune_backbones: []
+  finetune_regimes: []
+  finetune_seeds: []
+  deep_pretrained_indices: [0]
+  deep_finetuned_backbones: []
+  deep_selection_seed: 7101
+baselines:
+  methods: [input_x_gradient]
+reference_run: I9
+checkpoints:
+  root_environment: DECAF_CACHE_ROOT
+paper_assets:
+  figures: [6, 7, 12]
+  tables: [1]

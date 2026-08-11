@@ -1,0 +1,109 @@
+schema_version: 1
+experiment: imagenet9
+profile: paper
+max_workers: 32
+data:
+  root_environment: DECAF_DATA_ROOT
+  dataset_subdirectory: imagenet9
+  input_size: 224
+  paired_variant_rows: 4050
+  score_pairs_requested: 2048
+  score_pairs: 1644
+  deep_pairs: 768
+  shard_size: 512
+  sampling_seed: 91701
+  score_shortfall_policy: preserve_disjoint_split_use_all_available
+  required_variants: [original, mixed_same, mixed_rand, mixed_next, only_fg]
+  paired_manifest_sha256: e12b57770a84a3dfceb36d4b11b66eda3e6140203fec2c46e31cd986ceb80a10
+  score_split_sha256: e7f0a681ae517f9aea1b8d3351362859b23dc21cf0b9f585d48a1e81b09cf6bd
+  deep_split_sha256: ddc7315fd7850c8004c04721764d38ecd522b0a96d250c4382c3c488142af395
+experiment_grid:
+  pair_types: [same_rand, same_next]
+  reveal_paths: [blend, patch_A, patch_B]
+  patch_orders: [patch_order_A, patch_order_B]
+  alpha: [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0]
+  epsilon: 0.02
+  epsilon_sensitivity: [0.01, 0.02, 0.05]
+  corruption_severities: [1, 2]
+models:
+  torchvision:
+    - [resnet18, IMAGENET1K_V1]
+    - [resnet50, IMAGENET1K_V2]
+    - [resnet152, IMAGENET1K_V2]
+    - [resnext50_32x4d, IMAGENET1K_V2]
+    - [wide_resnet50_2, IMAGENET1K_V2]
+    - [densenet121, IMAGENET1K_V1]
+    - [efficientnet_b0, IMAGENET1K_V1]
+    - [efficientnet_v2_s, IMAGENET1K_V1]
+    - [regnet_y_8gf, IMAGENET1K_V2]
+    - [convnext_tiny, IMAGENET1K_V1]
+    - [swin_t, IMAGENET1K_V1]
+    - [vit_b_16, IMAGENET1K_V1]
+  timm:
+    - resnet50.a1_in1k
+    - resnet50d.a1_in1k
+    - efficientnet_b3.ra2_in1k
+    - regnety_032.ra_in1k
+    - convnext_tiny.fb_in1k
+    - convnext_base.fb_in1k
+    - deit_small_patch16_224.fb_in1k
+    - deit_base_patch16_224.fb_in1k
+    - swin_small_patch4_window7_224.ms_in1k
+    - maxvit_tiny_tf_224.in1k
+    - coatnet_0_rw_224.sw_in1k
+    - beit_base_patch16_224.in22k_ft_in22k_in1k
+  finetune_backbones:
+    [resnet50, convnext_tiny, efficientnet_b3, regnet_y_8gf, swin_t, vit_b_16]
+  finetune_regimes: [original, mixed_rand, mixed_next, only_fg]
+  finetune_seeds: [7101, 7102]
+  deep_pretrained_indices: [0, 1, 5, 6, 8, 9, 10, 11, 13, 14, 17, 18, 20, 21, 22, 23]
+  deep_finetuned_backbones: [resnet50, convnext_tiny, swin_t, vit_b_16]
+  deep_selection_seed: 7101
+  num_classes: 9
+baselines:
+  methods: [input_x_gradient, integrated_gradients, smoothgrad, blur_ig, occlusion, rise]
+  integrated_gradients_steps: 16
+  smoothgrad_samples: 16
+  blur_ig_levels: 12
+  occlusion_grid: 7
+  rise_masks: 256
+  difference_threshold: 0.031372549
+  difference_dilation: 3
+training:
+  epochs: 8
+  checkpoint_epochs: [1, 2, 4, 8]
+  optimizer: AdamW
+  scheduler: cosine
+  warmup_epochs: 1
+  precision: bf16
+  random_resized_crop_scale: [0.7, 1.0]
+  horizontal_flip: true
+  families:
+    cnn:
+      backbones: [resnet50, efficientnet_b3, regnet_y_8gf]
+      batch_size: 256
+      lr: 0.0003
+      weight_decay: 0.0001
+    transformer_convnext:
+      backbones: [convnext_tiny, swin_t, vit_b_16]
+      batch_size: 128
+      lr: 0.0001
+      weight_decay: 0.05
+corruptions:
+  gaussian_blur_sigma: [2.0, 5.0]
+  gaussian_noise_std: [0.05, 0.12]
+  color_shift: [0.1, 0.2]
+  pixelation_factor: [4, 8]
+  patch_shuffle_grid: [4, 8]
+statistics:
+  bootstrap_repetitions: 500
+  bootstrap_seed: 91702
+  confidence_levels: [0.9, 0.95]
+  matched_abs_bins: 20
+  matched_abs_relative_tolerance: 0.05
+reference_run: I9
+checkpoints:
+  root_environment: DECAF_CACHE_ROOT
+paper_assets:
+  figures: [6, 7, 12]
+  tables: [1]

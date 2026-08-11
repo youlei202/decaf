@@ -325,6 +325,7 @@ def requested_stages(stage: str) -> tuple[str, ...]:
 def execute_run(
     context: RunContext,
     handlers: Mapping[str, StageHandler],
+    resume_validators: Mapping[str, StageHandler] | None = None,
 ) -> int:
     """Execute stages with resumable, terminal-state-safe receipts."""
 
@@ -332,6 +333,9 @@ def execute_run(
     try:
         for stage in requested_stages(context.stage):
             if context.resume and context.stage_completed(stage):
+                validator = (resume_validators or {}).get(stage)
+                if validator is not None:
+                    validator(context)
                 completed.append(stage)
                 continue
             handler = handlers.get(stage)
@@ -387,6 +391,7 @@ def run_cli(
     args: argparse.Namespace,
     plan: Mapping[str, Any],
     handlers: Mapping[str, StageHandler],
+    resume_validators: Mapping[str, StageHandler] | None = None,
 ) -> int:
     """Run a family CLI after uniform planning and lifecycle setup."""
 
@@ -407,7 +412,7 @@ def run_cli(
         workers=workers,
         resume=args.resume,
     )
-    return execute_run(context, handlers)
+    return execute_run(context, handlers, resume_validators)
 
 
 __all__ = [

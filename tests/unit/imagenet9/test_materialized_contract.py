@@ -140,6 +140,13 @@ def test_materialized_members_bind_dependencies_receipts_and_exact_support(
 
     evaluate._atomic_parquet(baseline_output, baselines)
     evaluate._write_member_receipt(context, baseline, baseline_output, len(baselines))
+    fractional_stages = response.copy()
+    fractional_stages["stage_index"] = fractional_stages["stage_index"] + 0.9
+    evaluate._atomic_parquet(scan_output, fractional_stages)
+    evaluate._write_member_receipt(context, scan, scan_output, len(fractional_stages))
+    with pytest.raises(ValueError, match="stage indices must be finite integers"):
+        evaluate._load_materialized_members(context, plan)
+
     irregular_rows = []
     for pair_id, pair_type, alpha_grid in (
         ("pair0__same_rand", "same_rand", (0.0, 0.25, 0.75, 1.0)),

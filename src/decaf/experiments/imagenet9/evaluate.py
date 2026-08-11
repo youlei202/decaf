@@ -311,9 +311,20 @@ def validate_response_frame(frame: pd.DataFrame) -> pd.DataFrame:
     normalized = frame.copy()
     for column in ("pair_id", "model_id", "reveal_path"):
         normalized[column] = normalized[column].astype(str)
-    normalized["stage_index"] = normalized["stage_index"].astype(int)
-    normalized["alpha"] = normalized["alpha"].astype(float)
-    normalized["response"] = normalized["response"].astype(float)
+    stage_values = pd.to_numeric(normalized["stage_index"], errors="raise").to_numpy(
+        dtype=np.float64
+    )
+    if (
+        not np.isfinite(stage_values).all()
+        or not np.equal(stage_values, np.floor(stage_values)).all()
+    ):
+        raise ValueError("response stage indices must be finite integers")
+    normalized["stage_index"] = stage_values.astype(np.int64)
+    for column in ("alpha", "response"):
+        values = pd.to_numeric(normalized[column], errors="raise").to_numpy(dtype=np.float64)
+        if not np.isfinite(values).all():
+            raise ValueError(f"response {column} values must be finite")
+        normalized[column] = values
     key = ["pair_id", "model_id", "reveal_path", "stage_index"]
     if normalized.duplicated(key).any():
         raise ValueError("response paths contain duplicate trajectory stages")

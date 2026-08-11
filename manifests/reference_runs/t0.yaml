@@ -1,0 +1,23 @@
+schema_version: 1
+run_id: T0
+family: covertype
+scientific_status: sealed_reference_run
+archive:
+  filename: decaf_covertype_v1_20260811T090808Z_lightweight.zip
+  sha256: e9acaf30491dcdf654fdfb691df915e19d75e9c19d0ffe2546312d0d34f87927
+  size_bytes: 8758536
+  member_count: 111
+analysis_inputs:
+  - results/benchmark/rank_statistics.csv
+  - results/benchmark/bootstrap.csv
+  - results/benchmark/fixed_semantic.csv
+  - results/benchmark/matched_magnitude.csv
+  - results/tables/costs.csv
+  - results/baselines/shap_interaction_cost_summary.csv
+  - results/module_c/model_decaf.csv
+  - results/module_f/model_decaf.csv
+  - results/effective_config.yaml
+  - results/inventory/model_manifest.csv
+  - results/data/split_manifest.json
+  - results/inventory/shap_interaction_scheduler.json
+  - results/shap_interaction_stratified_128_manifest.parquet

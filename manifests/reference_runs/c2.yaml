@@ -1,0 +1,15 @@
+schema_version: 1
+run_id: C2
+family: controlled/context-swap
+scientific_status: sealed_reference_run
+archive:
+  filename: context_swap_c_v1_20260806T193622Z_lightweight.zip
+  sha256: 26bc5bc4a9efd5e23d6b34372f5ebce9c3563bb4d5659bc847c4344c67fe7ede
+  size_bytes: 83730158
+  member_count: 58
+analysis_inputs:
+  - evaluation/epsilon_curves.csv
+  - evaluation/behavior_rates.csv
+  - evaluation/model_level_results.csv
+  - bootstrap/bootstrap_summary.csv
+  - tables/T06_seed_results.csv

@@ -1,0 +1,46 @@
+schema_version: 1
+kind: dataset
+id: partimagenet
+title: PartImageNet semantic segmentation split
+families: [attribution]
+local_root: '${DECAF_DATA_ROOT}/partimagenet'
+redistributed: false
+source:
+  project_url: https://github.com/TACJu/PartImageNet
+  revision: f4bf3df88b126d3a2d5e8671a8c2ea90de39638e
+  download_url: https://huggingface.co/datasets/turkeyju/PartImageNet/resolve/main/PartImageNet_Seg.zip
+  expected_file: PartImageNet_Seg.zip
+license:
+  status: not_specified_by_pinned_source
+  spdx: null
+  note: The source contains ImageNet images; ImageNet terms apply and this repository does not redistribute them.
+identity:
+  approximate_images: 24080
+  source_archive_members: 192676
+  frozen_used_members: 72240
+fingerprints:
+  - id: source_archive
+    scope: exact_file
+    path: PartImageNet_Seg.zip
+    bytes: 3124435169
+    sha256: 9719778db7a7f589af94de4d7e4a025b832835502df370154f7c0a8b35466090
+    verification: verified
+    provenance: frozen_public_source_inventory
+  - id: image_manifest
+    scope: exact_file
+    path: manifests/partimagenet_manifest.parquet
+    sha256: 0bdfb5cf9547d903b9c570829d4a20da45cb540e6a6fec67da3001a23a3d8415
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: part_group_manifest
+    scope: exact_file
+    path: manifests/part_group_manifest.parquet
+    sha256: 5831159ba643efd41dcefcf52bf659e9919039fae30098e23fd8bf8089c9018e
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: frozen_subset_manifest
+    scope: exact_file
+    path: manifests/frozen_subset_manifest.parquet
+    sha256: d1198f5a06bd4ef9656473a047fe4e01ddabf2a76f5868dfa7ee6579ae710657
+    verification: verified
+    provenance: frozen_public_reference_manifest

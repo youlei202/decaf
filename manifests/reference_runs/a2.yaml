@@ -1,0 +1,15 @@
+schema_version: 1
+run_id: A2
+family: attribution/idsds
+scientific_status: sealed_reference_run
+archive:
+  filename: decaf_idsds_funnybirds_v1_20260811T054516Z_lightweight.zip
+  sha256: f68ed1fec48b39403fb677492283066f853722f466ce703edd5b468d59cc93a4
+  size_bytes: 140588387
+  member_count: 2607
+analysis_inputs:
+  - results/statistics/method_results.csv
+  - results/compute/timing_summary.csv
+  - results/compute/memory_summary.csv
+  - results/compute/query_counts.csv
+  - results/imagenet/full50k_scale_check.csv

@@ -1,0 +1,16 @@
+schema_version: 1
+run_id: C1
+family: controlled/evidence-fragility
+scientific_status: sealed_reference_run
+archive:
+  filename: endpoint_behavior_v1_b200_20260806T143355Z_lightweight.zip
+  sha256: 387c5a572249110a31698d384d942a8e1adf542c7c0b1a9f3a0c5d453102a8a7
+  size_bytes: 94240606
+  member_count: 58
+analysis_inputs:
+  - results/endpoint_behavior_v1_measurement/aggregate_summary.parquet
+  - results/endpoint_behavior_v1_measurement/stage_summary.parquet
+  - results/endpoint_behavior_v1_measurement/per_sample_bootstrap.parquet
+  - results/endpoint_behavior_v1_measurement/tables/T03_module_e_correlations.csv
+  - results/endpoint_behavior_v1_measurement/tables/T05_module_f_validation.csv
+  - results/endpoint_behavior_v1_measurement/tables/T07_geometry_transfer.csv

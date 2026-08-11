@@ -1,0 +1,92 @@
+schema_version: 1
+cases:
+  figure_02:
+    run_id: C0
+    input: benchmark/response_contamination.csv
+    rule:
+      filter: task == object_shape and factor in {object_shape, floor_color}
+      group_by: [factor]
+      aggregate: arithmetic mean of mean_auc_abs over the complete architecture/seed grid
+      order:
+        - architecture ascending
+        - model_seed ascending
+        - model_id ascending
+      tie_break: Reject duplicate factor/architecture/model_seed rows; the paper pair is fixed, not selected by nearest magnitude.
+    rationale: Reproduce the paper's fixed matched-magnitude comparison between intended shape and endpoint-null floor color.
+    resolved:
+      task: object_shape
+      aggregation: arithmetic_mean
+      architecture_scope: [resnet18, small_vit]
+      model_seeds: [3101, 3102, 3103]
+      rows_per_factor: 6
+      intended_factor:
+        factor: object_shape
+        endpoint_class: endpoint_supported
+        is_intended: true
+        mean_auc_abs: 0.05079873173186311
+        source_rows:
+          - {model_id: object_shape__resnet18__seed_3101, mean_auc_abs: 0.0454637780766195}
+          - {model_id: object_shape__resnet18__seed_3102, mean_auc_abs: 0.055503516652774525}
+          - {model_id: object_shape__resnet18__seed_3103, mean_auc_abs: 0.05113946055535174}
+          - {model_id: object_shape__small_vit__seed_3101, mean_auc_abs: 0.061296917880076365}
+          - {model_id: object_shape__small_vit__seed_3102, mean_auc_abs: 0.055585984120907796}
+          - {model_id: object_shape__small_vit__seed_3103, mean_auc_abs: 0.03580273310544876}
+      endpoint_null_factor:
+        factor: floor_color
+        endpoint_class: endpoint_null
+        is_intended: false
+        mean_auc_abs: 0.05268779850012135
+        source_rows:
+          - {model_id: object_shape__resnet18__seed_3101, mean_auc_abs: 0.04853123303352999}
+          - {model_id: object_shape__resnet18__seed_3102, mean_auc_abs: 0.05141408729317526}
+          - {model_id: object_shape__resnet18__seed_3103, mean_auc_abs: 0.054333611153664224}
+          - {model_id: object_shape__small_vit__seed_3101, mean_auc_abs: 0.07710768745819839}
+          - {model_id: object_shape__small_vit__seed_3102, mean_auc_abs: 0.046168938765684356}
+          - {model_id: object_shape__small_vit__seed_3103, mean_auc_abs: 0.03857123329647588}
+  figure_03:
+    run_id: C1
+    input: results/endpoint_behavior_v1_measurement/stage_summary.parquet
+    rule:
+      filter: module == E and primary_geometry is true
+      group_by: [architecture, p_train, seed, trajectory_id]
+      score: range of V_rev across distinct checkpoint epochs
+      order:
+        - score descending
+        - architecture ascending
+        - p_train ascending
+        - seed ascending
+        - trajectory_id ascending
+      select: first
+    rationale: Select the trajectory with the largest learned-reliance range.
+    resolved:
+      architecture: small_vit
+      training_correlation: 0.95
+      seed: 5102
+      trajectory_id: e__p095__small_vit__seed_5102
+      checkpoint_epochs: [1, 6, 7, 8, 19, 30]
+      V_rev_min: 0.0
+      V_rev_max: 0.89990234375
+      V_rev_range: 0.89990234375
+  figure_04:
+    run_id: C1
+    input: results/endpoint_behavior_v1_measurement/aggregate_summary.parquet
+    rule:
+      filter: module == F and primary_geometry is true and F is finite
+      order:
+        - F descending
+        - architecture ascending
+        - seed ascending
+        - variant ascending
+        - geometry ascending
+      select: first
+    rationale: Select the primary-geometry model with the largest measured fragility mass.
+    resolved:
+      model_id: f__fragile__small_vit__seed_5303
+      architecture: small_vit
+      seed: 5303
+      variant: fragile
+      geometry: cmmr
+      epoch: 20
+      F: 0.6754459869087548
+      null_prediction_change_rate: 0.6513730645632486
+      confidence_fragility: 0.6788327891325343

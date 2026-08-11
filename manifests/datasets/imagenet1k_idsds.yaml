@@ -1,0 +1,47 @@
+schema_version: 1
+kind: dataset
+id: imagenet1k_idsds
+title: ImageNet-1k validation data for IDSDS
+families: [attribution]
+local_root: '${DECAF_DATA_ROOT}/imagenet1k'
+redistributed: false
+source:
+  official_url: https://www.image-net.org/
+  idsds_project_url: https://github.com/visinf/idsds
+  idsds_revision: 8e842009423f14ac790b352b1f86846cc381415c
+  optional_repack:
+    repository: benjamin-paine/imagenet-1k
+    revision: ac6a45918fb830d6d1555b01090d7b991e8f8a4a
+    contract: complete unresampled parquet repack
+license:
+  status: restricted_by_upstream_terms
+  spdx: null
+  note: An alternate transport does not change ImageNet access or redistribution terms.
+fingerprints:
+  - id: idsds_10k
+    scope: exact_file
+    path: manifests/imagenet_idsds_10k.parquet
+    sha256: 3f6f9bad1c631f3eb95e8e2ae2fb171dd86470deaed7f3c93259feea952c0e79
+    rows: 10000
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: full_validation_50k
+    scope: exact_file
+    path: manifests/imagenet_full50k.parquet
+    sha256: bad5c0fe0df455bce6a5172233cd0cd549c562ee006e549bf2d7142fd0184fd7
+    rows: 50000
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: timing_1024
+    scope: exact_file
+    path: manifests/imagenet_timing_1024.parquet
+    sha256: 6c4f6d6b5bbe83d6d5ac9b9558dc97f844a2f2f2d4c77d1fc0db18a1505f8bd4
+    rows: 1024
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: strict_common_support
+    scope: exact_file
+    path: manifests/strict_common_support.parquet
+    sha256: b400ab055e7d47f25ef1eba6201e6f34f8b611a61db53433dc8dbe61f8d95034
+    verification: verified
+    provenance: frozen_public_reference_manifest

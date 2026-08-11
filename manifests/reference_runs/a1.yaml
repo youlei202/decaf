@@ -1,0 +1,13 @@
+schema_version: 1
+run_id: A1
+family: attribution/common-support-dinov2-g
+scientific_status: sealed_reference_run
+archive:
+  filename: decaf_reference_locked_common_support_dinog_20260810T213214Z_lightweight.zip
+  sha256: 0522de042bc71e679d2d724c1fe9242c812bb31b3dd9f562f18d70e7b8b4819b
+  size_bytes: 5648320
+  member_count: 112
+analysis_inputs:
+  - common_support/common_support_method_summary.csv
+  - dinov2_g_timing/dinov2_g_quality_timing_join.csv
+  - dinov2_g_timing/dinov2_g_timing_summary.csv

@@ -1,0 +1,51 @@
+schema_version: 1
+kind: dataset
+id: 3d_shapes
+title: DeepMind 3D Shapes
+families: [controlled]
+local_root: '${DECAF_DATA_ROOT}/3d_shapes'
+redistributed: false
+source:
+  project_url: https://github.com/google-deepmind/3d-shapes
+  download_url: https://storage.googleapis.com/3d-shapes/3dshapes.h5
+  expected_file: 3dshapes.h5
+license:
+  status: declared_by_upstream
+  spdx: Apache-2.0
+identity:
+  rows: 480000
+  generative_factors: 6
+fingerprints:
+  - id: source_hdf5
+    scope: exact_file
+    path: 3dshapes.h5
+    bytes: 267573662
+    sha256: 0a0f6ed98baff276a50f3a081a7434d788da63cb135a98189b2a5b5769be1785
+    md5: 099a2078d58cec4daad0702c55d06868
+    verification: verified
+    provenance: frozen_public_data_manifest
+  - id: processed_32x32
+    scope: logical_artifact
+    sha256: 54324173b7714e7d0ec0db13b7f99bd922ae49eddbb00724b25af64b8f6d4af5
+    verification: verified
+    provenance: frozen_public_data_manifest
+  - id: factor_index
+    scope: logical_artifact
+    sha256: 17168c247ee60c3dfded2e6cdcf4c7c60a2315c1309ef413b7a6f566fe49696e
+    verification: verified
+    provenance: frozen_public_data_manifest
+  - id: experiment_03_splits
+    scope: logical_artifact
+    sha256: 60402724b523cbb4514124c54d8b924f8c69bbff5f9c33e58cea3fb21d6722b5
+    verification: verified
+    provenance: frozen_public_data_manifest
+  - id: covariance_geometry
+    scope: logical_artifact
+    sha256: a5e90f6ac1ceee60be12faa63995c5c0d73e2f73d1efd9485a1e37fe5a9a5914
+    verification: verified
+    provenance: frozen_public_data_manifest
+  - id: full_state_support_cache
+    scope: logical_artifact
+    sha256: c3768a3a8daae4b4b92b557babf12faca56f0b8796223f916df52bc9df2a1287
+    verification: verified
+    provenance: frozen_public_data_manifest

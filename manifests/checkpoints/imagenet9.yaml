@@ -1,0 +1,42 @@
+schema_version: 1
+kind: checkpoint_inventory
+id: imagenet9
+cache_root: '${DECAF_CACHE_ROOT}/checkpoints/imagenet9'
+redistributed: false
+model_zoo:
+  total_models: 72
+  upstream_pretrained: 24
+  torchvision_pretrained: 12
+  timm_pretrained: 12
+  experiment_finetuned: 48
+  deep_subset: 32
+groups:
+  - id: upstream_pretrained
+    count: 24
+    availability: downloadable
+    redistributable: false
+    download_method: Resolve named weights through the pinned torchvision and timm APIs.
+    verification: resolved_manifest
+    license_note: Each upstream model and framework retains its own license and terms.
+  - id: experiment_finetuned
+    count: 48
+    availability: generated
+    redistributable: false
+    verification: user-provided_or_regenerated
+    note: Historical fine-tuned bytes are not bundled; regenerate from the paper plan or supply an authorized copy.
+manifest_fingerprints:
+  - id: pretrained_model_manifest
+    sha256: be05d27bd743bb39a1f34738d74835ed83ba7c0ff3ab4ba7a10a1ca62ed34d6e
+    verification: verified
+  - id: deep_model_subset
+    sha256: a0ee739b4de96ce5fbe34fa1ad6cbbf492dbe122154edc8494efa84d30468be3
+    verification: verified
+  - id: model_descriptors
+    sha256: 17dc023e7d79bb8ec31255d688c73f9643d3f8b3f5b27278793843387984b0c8
+    verification: verified
+  - id: model_zoo_csv
+    sha256: 3abd20f2350c227dc8d0252715abcc3233a3baa7c13699dc5e2fdd24e058ffbf
+    verification: verified
+provenance:
+  package: decaf_imagenet9_v1_20260808T164818Z_lightweight.zip
+  package_sha256: 3bae5ac670f6731d8a7832c3f9d7051e308a3f322c6192068bc11868be3821cc

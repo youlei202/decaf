@@ -1,0 +1,21 @@
+schema_version: 1
+run_id: I9
+family: imagenet9
+scientific_status: sealed_reference_run
+archive:
+  filename: decaf_imagenet9_v1_20260808T164818Z_lightweight.zip
+  sha256: 3bae5ac670f6731d8a7832c3f9d7051e308a3f322c6192068bc11868be3821cc
+  size_bytes: 41282023
+  member_count: 435
+analysis_inputs:
+  - results/mechanism_benchmark/fixed_semantic.csv
+  - results/tables/T04_mechanism_benchmark.csv
+  - results/matched_abs/matched_abs_benchmark.csv
+  - results/matched_abs/matched_pairs.parquet
+  - results/tables/T05A_per_bin_auroc.csv
+  - results/mechanism_benchmark/probe_leave_one_architecture_family_out_summary.csv
+  - results/model_decaf.csv
+  - results/tables/T03_decaf_profiles.csv
+  - results/sample_decaf.parquet
+  - results/stage_ledger.jsonl
+  - configs/decaf_imagenet9_v1/formal_8b200.yaml

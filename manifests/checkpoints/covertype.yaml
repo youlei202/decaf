@@ -1,0 +1,27 @@
+schema_version: 1
+kind: checkpoint_inventory
+id: covertype
+cache_root: '${DECAF_CACHE_ROOT}/checkpoints/covertype'
+redistributed: false
+default_action: retrain_from_frozen_plan
+model_grid:
+  total: 135
+  causal_direction:
+    count: 90
+    construction: 3 mechanisms times 2 strengths times 5 model families times 3 seeds
+  fragility:
+    count: 45
+    construction: 3 regimes times 5 model families times 3 seeds
+checkpoints:
+  availability: generated
+  format: joblib
+  redistributable: false
+  verification: unverified_historical_bytes
+  note: The lightweight package excludes large weights and its public manifest does not provide per-file checkpoint hashes.
+model_manifest:
+  rows: 135
+  sha256: 7f1af6288cb5f64ab95c255f2b08f8fe29eafcdaca22efc4d952cb0458b042d6
+  verification: verified
+  provenance:
+    package: decaf_covertype_v1_20260811T090808Z_lightweight.zip
+    package_sha256: e9acaf30491dcdf654fdfb691df915e19d75e9c19d0ffe2546312d0d34f87927

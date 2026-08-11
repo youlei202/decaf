@@ -1,0 +1,106 @@
+schema_version: 1
+kind: checkpoint_inventory
+id: attribution
+cache_root: '${DECAF_CACHE_ROOT}/checkpoints/attribution'
+redistributed: false
+sources:
+  torchvision:
+    project_url: https://pytorch.org/vision/stable/models.html
+    availability: downloadable
+  dinov2:
+    project_url: https://github.com/facebookresearch/dinov2
+    revision: 7764ea0f912e53c92e82eb78a2a1631e92725fc8
+    availability: downloadable
+  idsds:
+    project_url: https://github.com/visinf/idsds
+    revision: 8e842009423f14ac790b352b1f86846cc381415c
+    availability: restricted
+  funnybirds:
+    project_url: https://github.com/visinf/funnybirds-framework
+    availability: manual
+checkpoints:
+  - id: torchvision_resnet50
+    expected_filename: resnet50-11ad3fa6.pth
+    sha256: 11ad3fa62ca79e40addfd354a8ec4b7c75143b3038b8d2a807fbc68deab379ca
+    availability: downloadable
+    download_method: torchvision weights API
+    verification: verified
+  - id: torchvision_convnext_large
+    expected_filename: convnext_large-ea097f82.pth
+    sha256: ea097f822cdb2cab40905cec3949f4bdf6d6bf1d546c3ec5e43f0b1c6275e144
+    availability: downloadable
+    download_method: torchvision weights API
+    verification: verified
+  - id: torchvision_swin_b
+    expected_filename: swin_b-68c6b09e.pth
+    sha256: 68c6b09e73c66f27db19af59df563497fac4fc7889e42d82a0858b32c451a893
+    availability: downloadable
+    download_method: torchvision weights API
+    verification: verified
+  - id: dinov2_vitl14_backbone
+    expected_filename: dinov2_vitl14_pretrain.pth
+    sha256: d5383ea8f4877b2472eb973e0fd72d557c7da5d3611bd527ceeb1d7162cbf428
+    availability: downloadable
+    download_method: official DINOv2 hub
+    verification: verified
+  - id: dinov2_vitl14_linear_head
+    expected_filename: dinov2_vitl14_linear_head.pth
+    sha256: 73c5311cbe56f606deb4601363a6b96c7d5411f8b212d8ac562c5b17a92ee94f
+    availability: downloadable
+    download_method: official DINOv2 hub
+    verification: verified
+  - id: dinov2_vitg14_backbone
+    expected_filename: dinov2_vitg14_pretrain.pth
+    sha256: baf8467e50af277596bbbafa06887c177ee899ab46033649c383577d7e9309d3
+    availability: downloadable
+    download_method: official DINOv2 hub
+    verification: verified
+  - id: dinov2_vitg14_linear_head
+    expected_filename: dinov2_vitg14_linear_head.pth
+    sha256: ab61850e248839f9e242d7a5a1284feb3eace2dd109fa28f530a75d1bd17942a
+    availability: downloadable
+    download_method: official DINOv2 hub
+    verification: verified
+  - id: idsds_resnet50
+    expected_filename: resnet50_imagenet1000_lr0.001_epochs30_step10_checkpoint_best.pth.tar
+    sha256: dc4b6f9424ca154e5fa27aa5f574e4d7d94e2c969979c66ed978d4ef9eb799b4
+    availability: restricted
+    redistributable: false
+    verification: verified
+  - id: idsds_vgg16
+    expected_filename: vgg16_imagenet1000_lr0.001_epochs30_step10_checkpoint_best.pth.tar
+    sha256: ec5aad9340d467f6375f784336e3a083e4ee50abc53ecdc8209754d4841f78a4
+    availability: restricted
+    redistributable: false
+    verification: verified
+  - id: idsds_vit_base_patch16_224
+    expected_filename: vit_base_patch16_224_imagenet1000_lr0.001_epochs30_step10_checkpoint_best.pth.tar
+    sha256: 858fb793a1debb2e03254545e2a57f7533ea9a07a1d2445706afec27e3985033
+    availability: restricted
+    redistributable: false
+    verification: verified
+  - id: funnybirds_resnet
+    expected_filename: user-provided
+    sha256: 88f0fcf517ab5aa318325db7ffef46d65b52f0b8e18c325f5280d97f631ad139
+    availability: manual
+    redistributable: false
+    verification: expected_hash_only
+  - id: funnybirds_vgg
+    expected_filename: user-provided
+    sha256: 56ca79a65e0163bddd2c0f16bba5775ff3005e5b1a1a1ca53df5054b29bd1366
+    availability: manual
+    redistributable: false
+    verification: expected_hash_only
+  - id: funnybirds_vit
+    expected_filename: user-provided
+    sha256: 3d639524730445bba226abf39e907001331fe440a0f4111e1169b6e144172008
+    availability: manual
+    redistributable: false
+    verification: expected_hash_only
+manifest_fingerprints:
+  - id: formal_asset_manifest
+    sha256: 203d86f3612028c8ebbf8f53f28134166977dd1129cefa75d483221a8c5bacf1
+    verification: verified
+  - id: dataset_member_inventory
+    sha256: 539dfe5ec65e7133b39f3fa0eecc33473e87c13840cf30070b483d00a6701fbf
+    verification: verified

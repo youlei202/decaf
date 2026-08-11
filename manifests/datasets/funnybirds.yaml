@@ -1,0 +1,40 @@
+schema_version: 1
+kind: dataset
+id: funnybirds
+title: FunnyBirds
+families: [attribution]
+local_root: '${DECAF_DATA_ROOT}/funnybirds'
+redistributed: false
+source:
+  project_url: https://github.com/visinf/funnybirds
+  revision: 91b4b4628ffa962148144ee6bb5af5f022cac2f8
+  framework_url: https://github.com/visinf/funnybirds-framework
+  framework_revision: 1350bbe812ff18df25b2708df861245b9a63b9c9
+  download_url: https://download.visinf.tu-darmstadt.de/data/funnybirds/FunnyBirds.zip
+  expected_file: FunnyBirds.zip
+license:
+  status: declared_by_upstream
+  spdx: Apache-2.0
+identity:
+  source_archive_members: 126887
+  frozen_used_members: 1001
+fingerprints:
+  - id: source_archive
+    scope: exact_file
+    path: FunnyBirds.zip
+    bytes: 1549208915
+    sha256: 5b0dc030484ff4b1cd993e4084927bf9709c037193fa9fe4818d70a3e9e89f51
+    verification: verified
+    provenance: frozen_public_source_inventory
+  - id: study_manifest
+    scope: exact_file
+    path: manifests/funnybirds_manifest.parquet
+    sha256: bc4d1c647fd0f5ab6611bacfa5a558e15b246916cee037ca80cc6b056d890f2c
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: common_support
+    scope: exact_file
+    path: manifests/funnybirds_common_support.parquet
+    sha256: 19ae0c0766857ebb7f0ea09ae24f28ad97b322f2cd9a45325184ade43b7ed1ac
+    verification: verified
+    provenance: frozen_public_reference_manifest

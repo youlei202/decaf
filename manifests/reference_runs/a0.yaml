@@ -1,0 +1,13 @@
+schema_version: 1
+run_id: A0
+family: attribution/reference-locked
+scientific_status: sealed_reference_run
+archive:
+  filename: decaf_reference_locked_v1_20260810T184436Z_lightweight.zip
+  sha256: 7ecad798213d41662749625692618c615135776009ece187fd6a72adf067d420
+  size_bytes: 32919001
+  member_count: 414
+analysis_inputs:
+  - formal/formal_method_summary.csv
+  - formal/heldout_quality.parquet
+  - formal/part_attribution.parquet

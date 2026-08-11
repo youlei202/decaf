@@ -1,0 +1,14 @@
+schema_version: 1
+run_id: A3
+family: attribution/endpoint-m
+scientific_status: sealed_reference_run
+archive:
+  filename: decaf_idsds_funnybirds_endpoint_m_20260811T082640Z_lightweight.zip
+  sha256: b3b6c7abd41be23fdd47e36cbbc38bc0cb18f106cb6180340d76054e363a9ed5
+  size_bytes: 67051747
+  member_count: 25
+analysis_inputs:
+  - endpoint_m/method_results_with_m.csv
+  - endpoint_m/pairwise_differences_with_m.csv
+  - endpoint_m/per_model_with_m.csv
+  - endpoint_m/full50k_with_m.csv

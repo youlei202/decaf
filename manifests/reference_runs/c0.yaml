@@ -1,0 +1,13 @@
+schema_version: 1
+run_id: C0
+family: controlled/base
+scientific_status: sealed_reference_run
+archive:
+  filename: protocol_robust_main_v2_20260805T211038Z_lightweight.zip
+  sha256: 2126b7fcf720e367ca6dd6ed7c467c45ef20199364685d10372a96efa7ebf559
+  size_bytes: 26905060
+  member_count: 615
+analysis_inputs:
+  - benchmark/response_contamination.csv
+  - benchmark/method_metrics.csv
+  - benchmark/null_false_evidence.csv

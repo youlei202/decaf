@@ -1,0 +1,34 @@
+schema_version: 1
+kind: dataset
+id: covertype
+title: UCI Covertype binary paper split
+families: [covertype]
+local_root: '${DECAF_DATA_ROOT}/covertype'
+redistributed: false
+source:
+  official_url: https://archive.ics.uci.edu/dataset/31/covertype
+  loader: sklearn.datasets.fetch_covtype
+license:
+  status: declared_by_upstream
+  spdx: CC-BY-4.0
+identity:
+  source_rows: 581012
+  source_features: 54
+  selected_labels:
+    1: -1
+    2: 1
+  balanced_rows: 240000
+  split_seed: 7601
+  train_rows: 144000
+  validation_rows: 48000
+  test_rows: 48000
+  continuous_features_standardized: 10
+  binary_features_preserved: 44
+fingerprints:
+  - id: binary_split_contract
+    scope: logical_artifact
+    sha256: 07aa4349a338b765e0c143407ecc0acd4ccdf35ed0e13c8014519fdc013ade9c
+    verification: verified
+    provenance: frozen_public_reference_manifest
+notes:
+  - Continuous features use training-only population statistics with zero degrees of freedom.

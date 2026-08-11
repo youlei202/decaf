@@ -1,0 +1,85 @@
+schema_version: 1
+kind: dataset
+id: imagenet9_backgrounds_challenge
+title: ImageNet-9 Backgrounds Challenge
+families: [imagenet9]
+local_root: '${DECAF_DATA_ROOT}/imagenet9'
+redistributed: false
+source:
+  project_url: https://github.com/MadryLab/backgrounds_challenge
+  acquisition: Follow the upstream Backgrounds Challenge preparation instructions.
+license:
+  status: not_specified_by_pinned_source
+  spdx: null
+  note: Images derive from ImageNet; users must comply with all upstream and ImageNet terms.
+identity:
+  classes: 9
+  paired_variant_rows: 4050
+  rows_per_class: 450
+fingerprints:
+  - id: paired_variants_file
+    scope: exact_file
+    path: manifests/paired_variants.parquet
+    sha256: e12b57770a84a3dfceb36d4b11b66eda3e6140203fec2c46e31cd986ceb80a10
+    rows: 4050
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: paired_variants_canonical
+    scope: canonical_manifest
+    sha256: 207237403d8b41b7563602cb280f52831495b6e0483127b63dc267d2dab68726
+    rows: 4050
+    verification: verified
+    provenance: frozen_public_receipt
+  - id: score_split_file
+    scope: exact_file
+    path: manifests/score_split.parquet
+    sha256: e7f0a681ae517f9aea1b8d3351362859b23dc21cf0b9f585d48a1e81b09cf6bd
+    rows: 1644
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: score_split_canonical
+    scope: canonical_manifest
+    sha256: 69b7a2bdfc8710e8b56b4c8a8c97bce27fd9ba8f95771795cc3939daa26bb810
+    rows: 1644
+    verification: verified
+    provenance: frozen_public_receipt
+  - id: deep_split_file
+    scope: exact_file
+    path: manifests/deep_split.parquet
+    sha256: ddc7315fd7850c8004c04721764d38ecd522b0a96d250c4382c3c488142af395
+    rows: 768
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: deep_split_canonical
+    scope: canonical_manifest
+    sha256: e24bc3b856095b59df253fcc76582672ac786ce86d96324052a3a09e9d31b69a
+    rows: 768
+    verification: verified
+    provenance: frozen_public_receipt
+  - id: outcome_split_file
+    scope: exact_file
+    path: manifests/outcome_split.parquet
+    sha256: daba26473ce358781b28969adec414a65e8aaecaeaa9ed7033c5a9e8821138a6
+    rows: 1586
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: outcome_split_canonical
+    scope: canonical_manifest
+    sha256: 194332f7194fce1fb1ae0a4f7b0b44ddeb3abd0718606e28ff57bf5d72b18508
+    rows: 1586
+    verification: verified
+    provenance: frozen_public_receipt
+  - id: imagenet_to_imagenet9_mapping
+    scope: exact_file
+    path: metadata/in_to_in9.json
+    sha256: 5b72ab44c804129744f5dff9372d8048c3b85da38d48385d73686ee0b0e7b638
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: imagenet9_classes
+    scope: exact_file
+    path: metadata/in9_classes.json
+    sha256: 3fba913f1b7d60204437d1e12b8c2a30c68d7c8f4a697f154ecc4a3db9c00c16
+    verification: verified
+    provenance: frozen_public_reference_manifest
+notes:
+  - The paired manifest contains an 820-row deep preselection; the sealed paper deep split contains 768 rows.

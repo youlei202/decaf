@@ -1,0 +1,708 @@
+schema_version: 1
+assets:
+  figure_01:
+    kind: figure
+    number: 1
+    title: Conceptual overview
+    run_ids: []
+    raw_inputs: []
+    generator: decaf.paper.render.render_source_missing_asset
+    tex_target: paper/generated/figures/figure_01.tex
+    status: source_missing
+    source_note: The original paper-only TikZ coordinates were not present in the sealed sources.
+    generation_contract:
+      status: source_missing
+      operation: Recover the original conceptual layout and coordinates.
+    headline_assertions: []
+  figure_02:
+    kind: figure
+    number: 2
+    title: Matched magnitude and false-null ordering
+    run_ids: [C0]
+    raw_inputs:
+      - {run_id: C0, member: benchmark/response_contamination.csv}
+      - {run_id: C0, member: benchmark/method_metrics.csv}
+      - {run_id: C0, member: benchmark/null_false_evidence.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_02.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Compare false-evidence ordering after magnitude matching.
+    headline_assertions:
+      - id: figure_02_intended_abs_magnitude
+        status: verified
+        input: {run_id: C0, member: benchmark/response_contamination.csv}
+        operation: filtered_mean
+        filters: {task: object_shape, factor: object_shape}
+        column: mean_auc_abs
+        expected: 0.05079873173186311
+        expected_rows: 6
+        tolerance: 0.00000000000001
+      - id: figure_02_endpoint_null_abs_magnitude
+        status: verified
+        input: {run_id: C0, member: benchmark/response_contamination.csv}
+        operation: filtered_mean
+        filters: {task: object_shape, factor: floor_color}
+        column: mean_auc_abs
+        expected: 0.05268779850012135
+        expected_rows: 6
+        tolerance: 0.00000000000001
+      - id: figure_02_abs_cmmr_false_null_order
+        status: verified
+        input: {run_id: C0, member: benchmark/method_metrics.csv}
+        operation: filtered_mean
+        filters: {method: Abs-CMMR}
+        column: false_null_order
+        expected: 0.0732142857142857
+        expected_rows: 1
+        tolerance: 0.00000000000001
+      - id: figure_02_align_cmmr_false_null_order
+        status: verified
+        input: {run_id: C0, member: benchmark/method_metrics.csv}
+        operation: filtered_mean
+        filters: {method: Align-CMMR}
+        column: false_null_order
+        expected: 0.0
+        expected_rows: 1
+        tolerance: 0.0
+  figure_03:
+    kind: figure
+    number: 3
+    title: Evidence and learned reliance
+    run_ids: [C1]
+    raw_inputs:
+      - {run_id: C1, member: results/endpoint_behavior_v1_measurement/aggregate_summary.parquet}
+      - {run_id: C1, member: results/endpoint_behavior_v1_measurement/stage_summary.parquet}
+      - {run_id: C1, member: results/endpoint_behavior_v1_measurement/tables/T03_module_e_correlations.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_03.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute Module-E correlations and the deterministic representative trajectory.
+    headline_assertions:
+      - id: figure_03_evidence_correspondence
+        status: verified
+        input: {run_id: C1, member: results/endpoint_behavior_v1_measurement/tables/T03_module_e_correlations.csv}
+        operation: filtered_mean
+        filters: {metric: E_margin}
+        column: pooled_spearman
+        expected: 0.9360829105570195
+        expected_rows: 1
+        tolerance: 0.00000000000001
+  figure_04:
+    kind: figure
+    number: 4
+    title: Fragility validation
+    run_ids: [C1]
+    raw_inputs:
+      - {run_id: C1, member: results/endpoint_behavior_v1_measurement/aggregate_summary.parquet}
+      - {run_id: C1, member: results/endpoint_behavior_v1_measurement/per_sample_bootstrap.parquet}
+      - {run_id: C1, member: results/endpoint_behavior_v1_measurement/tables/T05_module_f_validation.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_04.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute Module-F association and bootstrap uncertainty.
+    headline_assertions:
+      - id: figure_04_robust_f
+        status: verified
+        input: {run_id: C1, member: results/endpoint_behavior_v1_measurement/tables/T05_module_f_validation.csv}
+        operation: filtered_mean
+        filters: {section: variant_summary, variant: robust, architecture: small_vit}
+        column: F_mean
+        expected: 0.010010929732585968
+        expected_rows: 1
+        tolerance: 0.00000000000001
+      - id: figure_04_neutral_f
+        status: verified
+        input: {run_id: C1, member: results/endpoint_behavior_v1_measurement/tables/T05_module_f_validation.csv}
+        operation: filtered_mean
+        filters: {section: variant_summary, variant: neutral, architecture: small_vit}
+        column: F_mean
+        expected: 0.09825587878990984
+        expected_rows: 1
+        tolerance: 0.00000000000001
+      - id: figure_04_fragile_f
+        status: verified
+        input: {run_id: C1, member: results/endpoint_behavior_v1_measurement/tables/T05_module_f_validation.csv}
+        operation: filtered_mean
+        filters: {section: variant_summary, variant: fragile, architecture: small_vit}
+        column: F_mean
+        expected: 0.5902969242474829
+        expected_rows: 1
+        tolerance: 0.00000000000001
+  figure_05:
+    kind: figure
+    number: 5
+    title: Contradiction validation
+    run_ids: [C2]
+    raw_inputs:
+      - {run_id: C2, member: evaluation/epsilon_curves.csv}
+      - {run_id: C2, member: evaluation/behavior_rates.csv}
+      - {run_id: C2, member: evaluation/model_level_results.csv}
+      - {run_id: C2, member: bootstrap/bootstrap_summary.csv}
+      - {run_id: C2, member: tables/T06_seed_results.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_05.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute epsilon calibration, behavior rates, and seed uncertainty.
+    headline_assertions:
+      - id: figure_05_c_swap_correlation
+        status: verified
+        inputs:
+          - {run_id: C2, member: evaluation/epsilon_curves.csv}
+          - {run_id: C2, member: evaluation/behavior_rates.csv}
+        operation: joined_spearman
+        join_columns: [model_id, task, architecture, seed, wall_map, epsilon]
+        columns: [C, pairwise_swap_rate]
+        expected: 0.9606652000
+        tolerance: 0.0000000001
+      - id: figure_05_abs_swap_correlation
+        status: verified
+        inputs:
+          - {run_id: C2, member: evaluation/epsilon_curves.csv}
+          - {run_id: C2, member: evaluation/behavior_rates.csv}
+        operation: joined_spearman
+        join_columns: [model_id, task, architecture, seed, wall_map, epsilon]
+        columns: [Abs, pairwise_swap_rate]
+        expected: -0.0359076958
+        tolerance: 0.0000000001
+      - id: figure_05_invert_c_at_registered_mismatch
+        status: verified
+        input: {run_id: C2, member: tables/T06_seed_results.csv}
+        operation: filtered_mean
+        filters: {task: invert}
+        column: C
+        expected: 0.49999733161716053
+        tolerance: 0.000000000001
+  figure_06:
+    kind: figure
+    number: 6
+    title: ImageNet-9 mechanism benchmark
+    run_ids: [I9]
+    raw_inputs:
+      - {run_id: I9, member: results/mechanism_benchmark/fixed_semantic.csv}
+      - {run_id: I9, member: results/tables/T04_mechanism_benchmark.csv}
+      - {run_id: I9, member: results/matched_abs/matched_abs_benchmark.csv}
+      - {run_id: I9, member: results/matched_abs/matched_pairs.parquet}
+      - {run_id: I9, member: results/tables/T05A_per_bin_auroc.csv}
+      - {run_id: I9, member: results/mechanism_benchmark/probe_leave_one_architecture_family_out_summary.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_06.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute fixed semantics, matched-absolute, per-bin, and held-out-family panels.
+    headline_assertions:
+      - id: figure_06_abs_matched_magnitude_accuracy
+        status: verified
+        input: {run_id: I9, member: results/matched_abs/matched_abs_benchmark.csv}
+        operation: filtered_mean
+        filters: {method: Abs}
+        column: matched_pair_accuracy
+        expected: 0.3501829734185867
+        expected_rows: 1
+        tolerance: 0.00000000000001
+      - id: figure_06_decaf_matched_magnitude_accuracy
+        status: verified
+        input: {run_id: I9, member: results/matched_abs/matched_abs_benchmark.csv}
+        operation: filtered_mean
+        filters: {method: DECAF}
+        column: matched_pair_accuracy
+        expected: 0.9639884183858124
+        expected_rows: 1
+        tolerance: 0.00000000000001
+  figure_07:
+    kind: figure
+    number: 7
+    title: ImageNet-9 protocol audit
+    run_ids: [I9]
+    raw_inputs:
+      - {run_id: I9, member: results/model_decaf.csv}
+      - {run_id: I9, member: results/tables/T03_decaf_profiles.csv}
+      - {run_id: I9, member: results/sample_decaf.parquet}
+      - {run_id: I9, member: results/stage_ledger.jsonl}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_07.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Generate patch/blend ratios and rank transfer from sealed rows, not paper arithmetic.
+    headline_assertions:
+      - id: figure_07_same_rand_abs_patch_blend_ratio
+        status: verified
+        input: {run_id: I9, member: results/tables/T03_decaf_profiles.csv}
+        operation: filtered_mean_ratio
+        common_filters: {pair_type: same_rand, epsilon: 0.02}
+        numerator_filters: {path: patch_A}
+        denominator_filters: {path: blend}
+        column: Abs
+        expected: 1.7372284770086692
+        tolerance: 0.000000000001
+      - id: figure_07_same_rand_f_patch_blend_ratio
+        status: verified
+        input: {run_id: I9, member: results/tables/T03_decaf_profiles.csv}
+        operation: filtered_mean_ratio
+        common_filters: {pair_type: same_rand, epsilon: 0.02}
+        numerator_filters: {path: patch_A}
+        denominator_filters: {path: blend}
+        column: F
+        expected: 4.3762687997406715
+        tolerance: 0.000000000001
+      - id: figure_07_same_next_abs_patch_blend_ratio
+        status: verified
+        input: {run_id: I9, member: results/tables/T03_decaf_profiles.csv}
+        operation: filtered_mean_ratio
+        common_filters: {pair_type: same_next, epsilon: 0.02}
+        numerator_filters: {path: patch_A}
+        denominator_filters: {path: blend}
+        column: Abs
+        expected: 1.7929210632916266
+        tolerance: 0.000000000001
+      - id: figure_07_same_next_f_patch_blend_ratio
+        status: verified
+        input: {run_id: I9, member: results/tables/T03_decaf_profiles.csv}
+        operation: filtered_mean_ratio
+        common_filters: {pair_type: same_next, epsilon: 0.02}
+        numerator_filters: {path: patch_A}
+        denominator_filters: {path: blend}
+        column: F
+        expected: 4.70751149983746
+        tolerance: 0.000000000001
+  figure_08:
+    kind: figure
+    number: 8
+    title: Complete controlled atlas
+    run_ids: [C0]
+    raw_inputs:
+      - {run_id: C0, member: benchmark/response_contamination.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_08.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Render every controlled task, architecture, seed, and factor cell.
+    headline_assertions: []
+  figure_09:
+    kind: figure
+    number: 9
+    title: All evidence trajectories
+    run_ids: [C1]
+    raw_inputs:
+      - {run_id: C1, member: results/endpoint_behavior_v1_measurement/aggregate_summary.parquet}
+      - {run_id: C1, member: results/endpoint_behavior_v1_measurement/stage_summary.parquet}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_09.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Render all Module-E checkpoint trajectories without manual selection.
+    headline_assertions: []
+  figure_10:
+    kind: figure
+    number: 10
+    title: Cross-geometry fragility transfer
+    run_ids: [C1]
+    raw_inputs:
+      - {run_id: C1, member: results/endpoint_behavior_v1_measurement/tables/T07_geometry_transfer.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_10.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute cross-geometry transfer statistics.
+    headline_assertions: []
+  figure_11:
+    kind: figure
+    number: 11
+    title: Contradiction calibration and transfer
+    run_ids: [C2]
+    raw_inputs:
+      - {run_id: C2, member: evaluation/epsilon_curves.csv}
+      - {run_id: C2, member: evaluation/model_level_results.csv}
+      - {run_id: C2, member: tables/T06_seed_results.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_11.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute contradiction calibration and transfer across registered wall maps.
+    headline_assertions: []
+  figure_12:
+    kind: figure
+    number: 12
+    title: ImageNet-9 robustness
+    run_ids: [I9]
+    raw_inputs:
+      - {run_id: I9, member: results/tables/T03_decaf_profiles.csv}
+      - {run_id: I9, member: results/sample_decaf.parquet}
+      - {run_id: I9, member: results/stage_ledger.jsonl}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/figures/figure_12.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute robustness summaries and ledger coverage.
+    headline_assertions: []
+  table_01:
+    kind: table
+    number: 1
+    title: ImageNet-9 access and query structure
+    run_ids: [I9]
+    raw_inputs:
+      - {run_id: I9, member: configs/decaf_imagenet9_v1/formal_8b200.yaml}
+    generator: decaf.paper.render.render_registry_table
+    tex_target: paper/generated/tables/table_01.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Generate access and query counts from the sealed method configuration.
+    headline_assertions: []
+  table_02:
+    kind: table
+    number: 2
+    title: FunnyBirds and ImageNet-1k attribution
+    run_ids: [A2, A3]
+    raw_inputs:
+      - {run_id: A2, member: results/statistics/method_results.csv}
+      - {run_id: A2, member: results/compute/timing_summary.csv}
+      - {run_id: A2, member: results/compute/memory_summary.csv}
+      - {run_id: A2, member: results/compute/query_counts.csv}
+      - {run_id: A3, member: endpoint_m/method_results_with_m.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_02.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Join quality, timing, memory, queries, and Endpoint-M rows by registered method.
+    headline_assertions:
+      - id: table_02_funnybirds_decaf_5
+        status: verified
+        input: {run_id: A3, member: endpoint_m/method_results_with_m.csv}
+        operation: filtered_mean
+        filters: {dataset: funnybirds, method: decaf_5}
+        column: mean
+        ci90_columns: [ci90_low, ci90_high]
+        ci95_columns: [ci95_low, ci95_high]
+        expected: 0.4032586441787493
+        expected_rows: 1
+        tolerance: 0.00000000000001
+      - id: table_02_imagenet_decaf_5
+        status: verified
+        input: {run_id: A3, member: endpoint_m/method_results_with_m.csv}
+        operation: filtered_mean
+        filters: {dataset: imagenet, method: decaf_5}
+        column: mean
+        ci90_columns: [ci90_low, ci90_high]
+        ci95_columns: [ci95_low, ci95_high]
+        expected: 0.3668448266626176
+        expected_rows: 1
+        tolerance: 0.00000000000001
+      - id: table_02_funnybirds_endpoint_m
+        status: verified
+        input: {run_id: A3, member: endpoint_m/method_results_with_m.csv}
+        operation: filtered_mean
+        filters: {dataset: funnybirds, method: endpoint_m}
+        column: mean
+        ci90_columns: [ci90_low, ci90_high]
+        ci95_columns: [ci95_low, ci95_high]
+        expected: 0.3235199814368542
+        expected_rows: 1
+        tolerance: 0.00000000000001
+      - id: table_02_imagenet_endpoint_m
+        status: verified
+        input: {run_id: A3, member: endpoint_m/method_results_with_m.csv}
+        operation: filtered_mean
+        filters: {dataset: imagenet, method: endpoint_m}
+        column: mean
+        ci90_columns: [ci90_low, ci90_high]
+        ci95_columns: [ci95_low, ci95_high]
+        expected: 0.3713393218889992
+        expected_rows: 1
+        tolerance: 0.00000000000001
+  table_03:
+    kind: table
+    number: 3
+    title: DINOv2 ViT-g stress test
+    run_ids: [A1]
+    raw_inputs:
+      - {run_id: A1, member: dinov2_g_timing/dinov2_g_quality_timing_join.csv}
+      - {run_id: A1, member: dinov2_g_timing/dinov2_g_timing_summary.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_03.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute joined DINOv2-g quality and timing summaries.
+    headline_assertions:
+      - id: table_03_ig32_decaf5_wall_ratio
+        status: verified
+        input: {run_id: A1, member: dinov2_g_timing/dinov2_g_timing_summary.csv}
+        operation: filtered_mean_ratio
+        numerator_filters: {method: ig_32}
+        denominator_filters: {method: decaf_5}
+        column: wall_seconds_per_image
+        expected: 4.753018872418976
+        expected_rows: 1
+        tolerance: 0.000000000001
+      - id: table_03_ig32_decaf5_memory_ratio
+        status: verified
+        input: {run_id: A1, member: dinov2_g_timing/dinov2_g_timing_summary.csv}
+        operation: filtered_mean_ratio
+        numerator_filters: {method: ig_32}
+        denominator_filters: {method: decaf_5}
+        column: peak_allocated_bytes
+        expected: 2.3640978423701218
+        expected_rows: 1
+        tolerance: 0.000000000001
+  table_04:
+    kind: table
+    number: 4
+    title: Trajectory gain beyond Endpoint M
+    run_ids: [A3]
+    raw_inputs:
+      - {run_id: A3, member: endpoint_m/pairwise_differences_with_m.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_04.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute paired trajectory-minus-endpoint differences.
+    headline_assertions: []
+  table_05:
+    kind: table
+    number: 5
+    title: Covertype behavior and cost
+    run_ids: [T0]
+    raw_inputs:
+      - {run_id: T0, member: results/benchmark/rank_statistics.csv}
+      - {run_id: T0, member: results/benchmark/bootstrap.csv}
+      - {run_id: T0, member: results/tables/costs.csv}
+      - {run_id: T0, member: results/baselines/shap_interaction_cost_summary.csv}
+      - {run_id: T0, member: results/module_f/model_decaf.csv}
+      - {run_id: T0, member: results/inventory/model_manifest.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_05.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute Covertype behavior statistics and normalized method costs.
+    headline_assertions:
+      - id: table_05_endpoint_null_fragility
+        status: verified
+        input: {run_id: T0, member: results/module_f/model_decaf.csv}
+        operation: spearman
+        columns: [F_U, null_context_prediction_change_rate]
+        expected: 0.9741
+        tolerance: 0.00005
+      - id: table_05_evidence_preservation
+        status: verified
+        input: {run_id: T0, member: results/benchmark/rank_statistics.csv}
+        operation: filtered_mean
+        filters: {outcome: preserve_rate, score_column: E}
+        column: spearman
+        expected: 0.864154
+        expected_rows: 1
+        tolerance: 0.0000005
+      - id: table_05_contradiction_inversion
+        status: verified
+        input: {run_id: T0, member: results/benchmark/rank_statistics.csv}
+        operation: filtered_mean
+        filters: {outcome: Y_C, score_column: C}
+        column: spearman
+        expected: 0.986787
+        expected_rows: 1
+        tolerance: 0.0000005
+      - id: table_05_shap_interaction_relative_cost
+        status: verified
+        operation: per_unit_filtered_ratio
+        numerator:
+          input: {run_id: T0, member: results/tables/costs.csv}
+          filters: {method: SHAP interaction}
+          column: wall_seconds
+        denominator:
+          input: {run_id: T0, member: results/tables/costs.csv}
+          filters: {method: DECAF}
+          column: wall_seconds
+        numerator_units:
+          input: {run_id: T0, member: results/baselines/shap_interaction_cost_summary.csv}
+          filters: {method: SHAP interaction}
+          column: completed_tree_models
+        denominator_units:
+          input: {run_id: T0, member: results/inventory/model_manifest.csv}
+          filters: {status: completed}
+          operation: row_count
+        expected: 10662.38729531742
+        expected_rows: 1
+        tolerance: 0.000001
+  table_06:
+    kind: table
+    number: 6
+    title: Complete cross-dataset attribution
+    run_ids: [A2, A3]
+    raw_inputs:
+      - {run_id: A2, member: results/statistics/method_results.csv}
+      - {run_id: A3, member: endpoint_m/method_results_with_m.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_06.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Join complete quality summaries across datasets and methods.
+    headline_assertions: []
+  table_07:
+    kind: table
+    number: 7
+    title: Paired endpoint versus trajectory
+    run_ids: [A3]
+    raw_inputs:
+      - {run_id: A3, member: endpoint_m/pairwise_differences_with_m.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_07.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Report paired endpoint-versus-trajectory contrasts.
+    headline_assertions: []
+  table_08:
+    kind: table
+    number: 8
+    title: Architecture-level endpoint ablation
+    run_ids: [A3]
+    raw_inputs:
+      - {run_id: A3, member: endpoint_m/per_model_with_m.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_08.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Aggregate endpoint ablation by registered architecture.
+    headline_assertions: []
+  table_09:
+    kind: table
+    number: 9
+    title: Full 50k ImageNet
+    run_ids: [A2, A3]
+    raw_inputs:
+      - {run_id: A2, member: results/imagenet/full50k_scale_check.csv}
+      - {run_id: A3, member: endpoint_m/full50k_with_m.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_09.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Join the full-50k scale check with Endpoint-M results.
+    headline_assertions: []
+  table_10:
+    kind: table
+    number: 10
+    title: Complete ImageNet compute
+    run_ids: [A2]
+    raw_inputs:
+      - {run_id: A2, member: results/compute/timing_summary.csv}
+      - {run_id: A2, member: results/compute/memory_summary.csv}
+      - {run_id: A2, member: results/compute/query_counts.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_10.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Join timing, peak memory, and query counts by method.
+    headline_assertions: []
+  table_11:
+    kind: table
+    number: 11
+    title: PartImageNet boundary case
+    run_ids: [A0, A1]
+    raw_inputs:
+      - {run_id: A1, member: common_support/common_support_method_summary.csv}
+      - {run_id: A0, member: formal/part_attribution.parquet}
+      - {run_id: A0, member: formal/heldout_quality.parquet}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_11.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute common-support quality from sealed per-part attribution records.
+    headline_assertions: []
+  table_12:
+    kind: table
+    number: 12
+    title: Covertype design
+    run_ids: [T0]
+    raw_inputs:
+      - {run_id: T0, member: results/effective_config.yaml}
+      - {run_id: T0, member: results/inventory/model_manifest.csv}
+      - {run_id: T0, member: results/inventory/shap_interaction_scheduler.json}
+    generator: decaf.paper.render.render_registry_table
+    tex_target: paper/generated/tables/table_12.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Generate the design from effective configuration, model registry, and scheduler plan.
+    headline_assertions: []
+  table_13:
+    kind: table
+    number: 13
+    title: Complete Covertype behavior alignment
+    run_ids: [T0]
+    raw_inputs:
+      - {run_id: T0, member: results/benchmark/rank_statistics.csv}
+      - {run_id: T0, member: results/module_f/model_decaf.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_13.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Generate complete E/C/F behavior alignment from the frozen rank tables.
+    headline_assertions: []
+  table_14:
+    kind: table
+    number: 14
+    title: Covertype model-family audit
+    run_ids: [T0]
+    raw_inputs:
+      - {run_id: T0, member: results/module_c/model_decaf.csv}
+      - {run_id: T0, member: results/module_f/model_decaf.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_14.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Audit Module-C and Module-F coverage by model family.
+    headline_assertions: []
+  table_15:
+    kind: table
+    number: 15
+    title: Fixed semantics and magnitude conditioning
+    run_ids: [T0]
+    raw_inputs:
+      - {run_id: T0, member: results/benchmark/fixed_semantic.csv}
+      - {run_id: T0, member: results/benchmark/matched_magnitude.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_15.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Recompute fixed-semantic and matched-magnitude summaries.
+    headline_assertions: []
+  table_16:
+    kind: table
+    number: 16
+    title: Complete Covertype cost
+    run_ids: [T0]
+    raw_inputs:
+      - {run_id: T0, member: results/tables/costs.csv}
+      - {run_id: T0, member: results/baselines/shap_interaction_cost_summary.csv}
+    generator: decaf.paper.render.render_data_asset
+    tex_target: paper/generated/tables/table_16.tex
+    status: ready
+    generation_contract:
+      status: replay_derived
+      operation: Join complete method and SHAP-interaction cost summaries.
+    headline_assertions: []

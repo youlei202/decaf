@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+runs/
+verification/
+paper/generated/**/*.tex
+!paper/generated/figures/.gitkeep
+!paper/generated/tables/.gitkeep

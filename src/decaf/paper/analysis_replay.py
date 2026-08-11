@@ -12,6 +12,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from .family_replay import replay_family_adapters
 from .manifest import load_representative_cases, load_visual_manifest, repository_root
 from .reference import (
     ReferenceError,
@@ -22,6 +23,7 @@ from .reference import (
     reference_roots,
     verify_archive,
 )
+from .semantic import materialize_canonical_assets
 
 
 def _frame(path: Path) -> pd.DataFrame:
@@ -228,8 +230,7 @@ def _equivalent(expected: Any, actual: Any) -> bool:
         )
     if isinstance(expected, list) and isinstance(actual, list):
         return len(expected) == len(actual) and all(
-            _equivalent(left, right)
-            for left, right in zip(expected, actual, strict=True)
+            _equivalent(left, right) for left, right in zip(expected, actual, strict=True)
         )
     return expected == actual
 
@@ -542,8 +543,8 @@ def replay_paper_data(
     representatives = replay_representative_cases(repo, paper_data)
     assertions = replay_headline_assertions(repo, paper_data)
     assets = _asset_summaries(repo, input_receipts, assertions)
-    receipt = {
-        "schema_version": 1,
+    receipt: dict[str, Any] = {
+        "schema_version": 2,
         "paper_data_directory": "paper_data",
         "runs": run_receipts,
         "inputs": input_receipts,
@@ -551,12 +552,26 @@ def replay_paper_data(
         "headline_assertions": assertions,
         "assets": assets,
     }
+    family_receipt = replay_family_adapters(
+        output,
+        repo_root=repo,
+        reference_roots=roots,
+    )
+    receipt["family_replay"] = family_receipt
+    receipt["canonical"] = materialize_canonical_assets(
+        output,
+        repo_root=repo,
+        replay_receipt=receipt,
+        family_receipt=family_receipt,
+    )
     receipt_path = output / "replay_receipt.json"
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "reference_runs_verified": len(run_receipts),
         "machine_readable_inputs_materialized": len(input_receipts),
+        "family_replays_completed": family_receipt["family_count"],
+        "canonical_assets_materialized": receipt["canonical"]["artifact_count"],
         "representative_cases": representatives,
         "headline_assertions": assertions,
     }

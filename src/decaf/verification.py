@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
+import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -17,7 +19,7 @@ from decaf.audit import audit_repository
 from decaf.experiments.common import atomic_json, atomic_text, repository_root, utc_now
 from decaf.paper.analysis_replay import replay_paper_data
 from decaf.paper.manifest import load_visual_manifest
-from decaf.paper.render import render_all
+from decaf.paper.render import PaperRenderError, render_all, validate_rendered_asset
 
 MODES = (
     "all-cpu",
@@ -25,6 +27,7 @@ MODES = (
     "unit",
     "integration-cpu",
     "full-plan",
+    "quality",
     "repository-audit",
 )
 FAMILIES = ("controlled", "imagenet9", "attribution", "covertype")
@@ -42,7 +45,16 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _run_command(command: Sequence[str], *, cwd: Path) -> dict[str, Any]:
+def _portable_command(command: Sequence[str]) -> list[str]:
+    """Hide environment-specific interpreter paths from public receipts."""
+
+    return [
+        "python" if index == 0 and argument == sys.executable else str(argument)
+        for index, argument in enumerate(command)
+    ]
+
+
+def _run_command(command: Sequence[str], *, cwd: Path, echo_output: bool = True) -> dict[str, Any]:
     started = time.monotonic()
     process = subprocess.run(
         tuple(command),
@@ -52,9 +64,10 @@ def _run_command(command: Sequence[str], *, cwd: Path) -> dict[str, Any]:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
-    sys.stdout.write(process.stdout)
+    if echo_output:
+        sys.stdout.write(process.stdout)
     report = {
-        "command": list(command),
+        "command": _portable_command(command),
         "elapsed_seconds": round(time.monotonic() - started, 6),
         "exit_code": process.returncode,
         "status": "passed" if process.returncode == 0 else "failed",
@@ -62,62 +75,399 @@ def _run_command(command: Sequence[str], *, cwd: Path) -> dict[str, Any]:
     }
     if process.returncode:
         raise VerificationFailure(
-            f"command failed with exit code {process.returncode}: {' '.join(command)}"
+            "command failed with exit code "
+            f"{process.returncode}: {' '.join(_portable_command(command))}"
         )
     return report
+
+
+def _git_identity(repo: Path) -> dict[str, Any]:
+    """Bind verification evidence to the exact repository tree under test."""
+
+    def git(*arguments: str) -> str:
+        process = subprocess.run(
+            ("git", *arguments),
+            cwd=repo,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        return process.stdout.strip()
+
+    status = git("status", "--porcelain=v1")
+    return {
+        "repository_commit": git("rev-parse", "HEAD"),
+        "repository_tree": git("rev-parse", "HEAD^{tree}"),
+        "tracked_worktree_clean": not status,
+    }
 
 
 def _write_artifact_diff(
     repo: Path,
     generated_paths: Sequence[Path],
     verification: Path,
+    canonical_receipt: Mapping[str, Any],
+    generated_root: Path,
 ) -> dict[str, Any]:
+    """Write an exact 28-asset, canonical-data-bound render inventory."""
+
     manifest = load_visual_manifest(repo / "paper" / "visual_manifest.yaml")
+    generated_root = generated_root.resolve()
+    if len(generated_paths) != len(manifest.assets):
+        raise VerificationFailure(
+            f"paper render emitted {len(generated_paths)} paths, expected {len(manifest.assets)}"
+        )
     by_name = {path.name: path for path in generated_paths}
+    if len(by_name) != len(generated_paths):
+        raise VerificationFailure("paper render emitted duplicate destination names")
+    canonical_rows = canonical_receipt.get("artifacts")
+    if (
+        canonical_receipt.get("status") != "completed"
+        or canonical_receipt.get("artifact_count") != 27
+        or not isinstance(canonical_rows, list)
+        or len(canonical_rows) != 27
+    ):
+        raise VerificationFailure("canonical receipt does not contain exactly 27 artifacts")
+    canonical_by_id = {
+        str(item.get("asset_id")): item for item in canonical_rows if isinstance(item, Mapping)
+    }
+    if len(canonical_by_id) != 27:
+        raise VerificationFailure("canonical receipt contains duplicate/malformed asset IDs")
     rows: list[dict[str, Any]] = []
     for asset in manifest.assets.values():
         expected_name = Path(asset.tex_target).name
         path = by_name.get(expected_name)
         exists = path is not None and path.is_file()
-        source_missing = asset.status == "source_missing"
+        classification = "missing"
+        if exists and path is not None:
+            try:
+                classification = validate_rendered_asset(asset, path.read_text(encoding="utf-8"))
+            except (PaperRenderError, UnicodeDecodeError):
+                classification = "invalid_rendered_asset"
+        canonical = canonical_by_id.get(asset.asset_id)
+        if asset.status == "source_missing":
+            if canonical is not None:
+                raise VerificationFailure(
+                    f"source-missing {asset.asset_id} unexpectedly has canonical data"
+                )
+            canonical = {}
+        elif canonical is None:
+            raise VerificationFailure(f"{asset.asset_id} has no canonical-data receipt")
+        relative = ""
+        if path is not None:
+            try:
+                relative = path.resolve().relative_to(generated_root).as_posix()
+            except ValueError as error:
+                raise VerificationFailure(
+                    f"generated asset escapes generated root: {path}"
+                ) from error
+        exported_generated = f"paper_outputs/generated/{relative}" if relative else ""
+        canonical_path = str(canonical.get("path", ""))
+        exported_canonical = ""
+        if canonical_path:
+            prefix = "paper_data/canonical/"
+            if not canonical_path.startswith(prefix):
+                raise VerificationFailure(
+                    f"{asset.asset_id} canonical path is outside the registered root"
+                )
+            exported_canonical = "paper_outputs/canonical/" + canonical_path[len(prefix) :]
         rows.append(
             {
                 "asset_id": asset.asset_id,
                 "kind": asset.kind,
                 "number": asset.number,
-                "generated_path": (
-                    path.relative_to(repo).as_posix()
-                    if path is not None and path.is_relative_to(repo)
-                    else str(path or "")
-                ),
-                "sha256": _sha256(path) if exists and path is not None else "",
-                "status": (
-                    "source_missing_recorded"
-                    if exists and source_missing
-                    else "regenerated"
-                    if exists
-                    else "missing"
+                "manifest_status": asset.status,
+                "generated_path": exported_generated,
+                "generated_sha256": _sha256(path) if exists and path is not None else "",
+                "generated_bytes": path.stat().st_size if exists and path is not None else "",
+                "comparison_status": classification,
+                "canonical_path": exported_canonical,
+                "canonical_sha256": canonical.get("sha256", ""),
+                "semantic_contract_sha256": canonical.get("semantic_contract_sha256", ""),
+                "schema_sha256": canonical.get("schema_sha256", ""),
+                "row_count": canonical.get("row_count", ""),
+                "panel_cardinality": json.dumps(
+                    canonical.get("panel_cardinality", {}),
+                    sort_keys=True,
+                    separators=(",", ":"),
                 ),
             }
         )
     destination = verification / "paper_artifact_diff.csv"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    columns = ("asset_id", "kind", "number", "generated_path", "sha256", "status")
+    columns = tuple(rows[0])
     buffer = StringIO()
     writer = csv.DictWriter(buffer, fieldnames=columns, lineterminator="\n")
     writer.writeheader()
     writer.writerows(rows)
     atomic_text(destination, buffer.getvalue())
-    missing = [row["asset_id"] for row in rows if row["status"] == "missing"]
-    if missing:
-        raise VerificationFailure(f"paper assets were not regenerated: {missing}")
-    return {
-        "figures_regenerated": sum(row["kind"] == "figure" for row in rows),
-        "tables_regenerated": sum(row["kind"] == "table" for row in rows),
+    invalid = [
+        row["asset_id"]
+        for row in rows
+        if row["comparison_status"] in {"missing", "invalid_rendered_asset"}
+    ]
+    if invalid:
+        raise VerificationFailure(f"paper assets were not data-rendered: {invalid}")
+    summary = {
+        "paper_assets_mapped": len(rows),
+        "figure_assets_emitted": sum(row["kind"] == "figure" for row in rows),
+        "figures_regenerated": sum(
+            row["comparison_status"] == "regenerated_semantic_geometry" for row in rows
+        ),
+        "figures_source_missing_recorded": sum(
+            row["comparison_status"] == "source_missing_recorded" for row in rows
+        ),
+        "tables_regenerated": sum(
+            row["comparison_status"] == "regenerated_semantic_table" for row in rows
+        ),
         "source_missing_recorded": [
-            row["asset_id"] for row in rows if row["status"] == "source_missing_recorded"
+            row["asset_id"] for row in rows if row["comparison_status"] == "source_missing_recorded"
         ],
     }
+    expected = {
+        "paper_assets_mapped": 28,
+        "figure_assets_emitted": 12,
+        "figures_regenerated": 11,
+        "figures_source_missing_recorded": 1,
+        "tables_regenerated": 16,
+        "source_missing_recorded": ["figure_01"],
+    }
+    if summary != expected:
+        raise VerificationFailure(f"paper artifact summary differs from contract: {summary}")
+    return summary
+
+
+def _repository_relative(path: Path, repo: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _inventory_row(path: Path, root: Path, root_name: str, role: str) -> dict[str, Any]:
+    resolved = path.resolve()
+    try:
+        relative = resolved.relative_to(root.resolve()).as_posix()
+    except ValueError as error:
+        raise VerificationFailure(f"artifact escapes {root_name}: {path}") from error
+    if not resolved.is_file() or resolved.stat().st_size <= 0:
+        raise VerificationFailure(f"artifact is missing or empty: {path}")
+    return {
+        "portable_path": f"{root_name}/{relative}",
+        "source_root": root_name,
+        "relative_path": relative,
+        "sha256": _sha256(resolved),
+        "size_bytes": resolved.stat().st_size,
+        "role": role,
+    }
+
+
+def _assert_portable_evidence(paths: Sequence[Path]) -> None:
+    forbidden = ("/work/Users/", "/home/", "/tmp/", "C:\\Users\\")
+    for path in paths:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as error:
+            raise VerificationFailure(f"paper evidence is not UTF-8 text: {path}") from error
+        matched = next((value for value in forbidden if value in content), None)
+        if matched is not None:
+            raise VerificationFailure(
+                f"paper evidence contains a private absolute-path fragment: {path}"
+            )
+        if any(
+            0x3400 <= ord(character) <= 0x4DBF
+            or 0x4E00 <= ord(character) <= 0x9FFF
+            or 0xF900 <= ord(character) <= 0xFAFF
+            for character in content
+        ):
+            raise VerificationFailure(f"paper evidence contains CJK text: {path}")
+
+
+def _legacy_analysis_artifact_inventory(
+    *,
+    replay_root: Path,
+    generated_root: Path,
+    verification: Path,
+    generated_paths: Sequence[Path],
+    receipt: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    rows = [
+        _inventory_row(path, generated_root, "generated_root", "generated_tex")
+        for path in generated_paths
+    ]
+    canonical = receipt.get("canonical")
+    if not isinstance(canonical, Mapping):
+        raise VerificationFailure("analysis replay has no canonical receipt")
+    canonical_rows = canonical.get("artifacts")
+    if not isinstance(canonical_rows, list) or len(canonical_rows) != 27:
+        raise VerificationFailure("analysis replay canonical inventory is not exactly 27")
+    for item in canonical_rows:
+        if not isinstance(item, Mapping):
+            raise VerificationFailure("canonical artifact receipt is malformed")
+        path = replay_root / str(item.get("path", ""))
+        row = _inventory_row(path, replay_root, "replay_root", "canonical_csv")
+        if row["sha256"] != item.get("sha256") or row["size_bytes"] != item.get("size_bytes"):
+            raise VerificationFailure(f"canonical artifact bytes drifted: {path}")
+        rows.append(row)
+    receipt_files = (
+        (
+            replay_root / str(canonical.get("path", "")),
+            replay_root,
+            "replay_root",
+            "canonical_receipt",
+            canonical,
+        ),
+        (
+            replay_root / "family_replays" / "family_replay_receipt.json",
+            replay_root,
+            "replay_root",
+            "family_replay_receipt",
+            None,
+        ),
+        (
+            replay_root / "replay_receipt.json",
+            replay_root,
+            "replay_root",
+            "replay_receipt",
+            None,
+        ),
+        (
+            verification / "headline_assertions.json",
+            verification,
+            "verification_root",
+            "headline_assertions",
+            None,
+        ),
+        (
+            verification / "paper_artifact_diff.csv",
+            verification,
+            "verification_root",
+            "paper_artifact_diff",
+            None,
+        ),
+    )
+    for path, root, root_name, role, expected in receipt_files:
+        row = _inventory_row(path, root, root_name, role)
+        if expected is not None and (
+            row["sha256"] != expected.get("sha256")
+            or row["size_bytes"] != expected.get("size_bytes")
+        ):
+            raise VerificationFailure(f"recorded receipt bytes drifted: {path}")
+        rows.append(row)
+    portable_paths = [str(row["portable_path"]) for row in rows]
+    if len(rows) != 60 or len(set(portable_paths)) != 60:
+        raise VerificationFailure(
+            f"analysis artifact inventory must contain 60 unique paths, received {len(rows)}"
+        )
+    return sorted(rows, key=lambda row: str(row["portable_path"]))
+
+
+def _seal_paper_outputs(
+    *,
+    replay_root: Path,
+    generated_root: Path,
+    verification: Path,
+    generated_paths: Sequence[Path],
+    receipt: Mapping[str, Any],
+) -> list[tuple[Path, str]]:
+    """Copy the exact public evidence allowlist under the verification root."""
+
+    export_root = verification / "paper_outputs"
+    if export_root.exists():
+        shutil.rmtree(export_root)
+    exports: list[tuple[Path, str]] = []
+
+    def copy(source: Path, destination: Path, role: str) -> None:
+        if source.is_symlink() or not source.is_file() or source.stat().st_size <= 0:
+            raise VerificationFailure(f"paper evidence source is unsafe: {source}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+        if _sha256(source) != _sha256(destination):
+            raise VerificationFailure(f"paper evidence copy drifted: {destination}")
+        exports.append((destination, role))
+
+    for path in generated_paths:
+        try:
+            relative = path.resolve().relative_to(generated_root.resolve())
+        except ValueError as error:
+            raise VerificationFailure(f"generated asset escapes generated root: {path}") from error
+        copy(path, export_root / "generated" / relative, "generated_tex")
+
+    canonical = receipt.get("canonical")
+    if not isinstance(canonical, Mapping):
+        raise VerificationFailure("analysis replay has no canonical receipt")
+    canonical_rows = canonical.get("artifacts")
+    if not isinstance(canonical_rows, list) or len(canonical_rows) != 27:
+        raise VerificationFailure("analysis replay canonical inventory is not exactly 27")
+    for item in canonical_rows:
+        if not isinstance(item, Mapping):
+            raise VerificationFailure("canonical artifact receipt is malformed")
+        relative = str(item.get("path", ""))
+        prefix = "paper_data/canonical/"
+        if not relative.startswith(prefix):
+            raise VerificationFailure(f"canonical artifact path is outside its root: {relative}")
+        source = replay_root / relative
+        if _sha256(source) != item.get("sha256") or source.stat().st_size != item.get("size_bytes"):
+            raise VerificationFailure(f"canonical artifact bytes drifted: {source}")
+        copy(source, export_root / "canonical" / relative[len(prefix) :], "canonical_csv")
+
+    receipt_files = (
+        (
+            replay_root / str(canonical.get("path", "")),
+            export_root / "receipts" / "canonical_receipt.json",
+            "canonical_receipt",
+        ),
+        (
+            replay_root / "family_replays" / "family_replay_receipt.json",
+            export_root / "receipts" / "family_replay_receipt.json",
+            "family_replay_receipt",
+        ),
+        (
+            replay_root / "replay_receipt.json",
+            export_root / "receipts" / "replay_receipt.json",
+            "replay_receipt",
+        ),
+    )
+    for source, destination, role in receipt_files:
+        copy(source, destination, role)
+    if len(exports) != 58:
+        raise VerificationFailure(
+            f"sealed paper outputs must contain 58 files, received {len(exports)}"
+        )
+    return exports
+
+
+def _analysis_artifact_inventory(
+    *,
+    verification: Path,
+    sealed_outputs: Sequence[tuple[Path, str]],
+) -> list[dict[str, Any]]:
+    rows = [
+        _inventory_row(path, verification, "verification_root", role)
+        for path, role in sealed_outputs
+    ]
+    rows.extend(
+        [
+            _inventory_row(
+                verification / "headline_assertions.json",
+                verification,
+                "verification_root",
+                "headline_assertions",
+            ),
+            _inventory_row(
+                verification / "paper_artifact_diff.csv",
+                verification,
+                "verification_root",
+                "paper_artifact_diff",
+            ),
+        ]
+    )
+    portable_paths = [str(row["portable_path"]) for row in rows]
+    if len(rows) != 60 or len(set(portable_paths)) != 60:
+        raise VerificationFailure(
+            f"analysis artifact inventory must contain 60 unique paths, received {len(rows)}"
+        )
+    return sorted(rows, key=lambda row: str(row["portable_path"]))
 
 
 def run_analysis_replay(
@@ -144,34 +494,90 @@ def run_analysis_replay(
     if unacceptable:
         raise VerificationFailure(
             "headline assertions did not fail closed: "
-            + ", ".join(
-                f"{name}={value.get('status')}" for name, value in unacceptable.items()
-            )
+            + ", ".join(f"{name}={value.get('status')}" for name, value in unacceptable.items())
         )
-    artifact_summary = _write_artifact_diff(repo, paths, verification)
+    canonical = receipt.get("canonical")
+    if not isinstance(canonical, Mapping):
+        raise VerificationFailure("analysis replay did not publish canonical artifacts")
+    artifact_summary = _write_artifact_diff(
+        repo,
+        paths,
+        verification,
+        canonical,
+        generated_root,
+    )
     headline_report = {
         "schema_version": 1,
         "status": "passed",
         "assertion_count": len(assertions),
-        "verified_count": sum(
-            value.get("status") == "verified" for value in assertions.values()
-        ),
+        "verified_count": sum(value.get("status") == "verified" for value in assertions.values()),
         "source_missing_count": sum(
             value.get("status") == "source_missing" for value in assertions.values()
         ),
         "assertions": assertions,
     }
     atomic_json(verification / "headline_assertions.json", headline_report)
+    sealed_outputs = _seal_paper_outputs(
+        replay_root=replay_root,
+        generated_root=generated_root,
+        verification=verification,
+        generated_paths=paths,
+        receipt=receipt,
+    )
+    _assert_portable_evidence(
+        [path for path, _ in sealed_outputs]
+        + [
+            verification / "headline_assertions.json",
+            verification / "paper_artifact_diff.csv",
+        ]
+    )
+    inventory = _analysis_artifact_inventory(
+        verification=verification,
+        sealed_outputs=sealed_outputs,
+    )
+    hashes_by_role = {str(item["role"]): str(item["sha256"]) for item in inventory}
+    inventory_sha256 = hashlib.sha256(
+        json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    family_replay = receipt.get("family_replay")
+    if not isinstance(family_replay, Mapping):
+        raise VerificationFailure("analysis replay did not publish family receipts")
+    replay_relative = _repository_relative(replay_root, repo)
+    generated_relative = _repository_relative(generated_root, repo)
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "passed",
         "completed_at": utc_now(),
+        "replay_root": (
+            f"repository_root/{replay_relative}"
+            if replay_relative is not None
+            else "verification_root/replay"
+        ),
+        "replay_root_relative_to_repository": replay_relative,
+        "generated_root": (
+            f"repository_root/{generated_relative}"
+            if generated_relative is not None
+            else "generated_root"
+        ),
+        "generated_root_relative_to_repository": generated_relative,
+        "paper_outputs_root": "verification_root/paper_outputs",
         "reference_runs_verified": len(receipt["runs"]),
         "inputs_materialized": len(receipt["inputs"]),
+        "family_replays_completed": family_replay.get("family_count"),
+        "canonical_assets_materialized": canonical.get("artifact_count"),
         **artifact_summary,
         "headline_assertion_count": len(assertions),
         "headline_assertions_status": "passed",
         "model_inference_performed": False,
+        "replay_receipt_sha256": hashes_by_role["replay_receipt"],
+        "family_replay_receipt_sha256": hashes_by_role["family_replay_receipt"],
+        "canonical_receipt_sha256": hashes_by_role["canonical_receipt"],
+        "headline_assertions_sha256": hashes_by_role["headline_assertions"],
+        "paper_artifact_diff_sha256": hashes_by_role["paper_artifact_diff"],
+        "artifact_inventory_count": len(inventory),
+        "artifact_inventory_sha256": inventory_sha256,
+        "artifact_inventory": inventory,
+        **_git_identity(repo),
     }
     atomic_json(verification / "analysis_replay.json", report)
     return report
@@ -181,9 +587,7 @@ def run_unit(repo: Path) -> dict[str, Any]:
     """Run model-agnostic and paper-regression tests."""
 
     targets = [
-        relative
-        for relative in ("tests/unit", "tests/regression")
-        if (repo / relative).exists()
+        relative for relative in ("tests/unit", "tests/regression") if (repo / relative).exists()
     ]
     return _run_command([sys.executable, "-m", "pytest", "-q", *targets], cwd=repo)
 
@@ -202,12 +606,87 @@ def run_integration_cpu(repo: Path) -> dict[str, Any]:
     return report
 
 
+def _assertion_status(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, dict) and isinstance(value.get("passed"), bool):
+        return bool(value["passed"])
+    return None
+
+
+def _summarize_plan_report(family: str, report: dict[str, Any]) -> dict[str, Any]:
+    """Parse a planner receipt, fail on false assertions, and omit its large body."""
+
+    output = str(report.get("output", ""))
+    try:
+        plan = json.loads(output)
+    except (TypeError, json.JSONDecodeError) as error:
+        raise VerificationFailure(f"{family} plan-only output is not one JSON document") from error
+    if not isinstance(plan, dict):
+        raise VerificationFailure(f"{family} plan-only output is not an object")
+
+    assertion_source = plan.get("assertions")
+    if not isinstance(assertion_source, dict):
+        assertion_source = plan.get("audit")
+    if not isinstance(assertion_source, dict):
+        raise VerificationFailure(f"{family} plan has no assertion/audit mapping")
+
+    assertions = {
+        name: status
+        for name, value in assertion_source.items()
+        if (status := _assertion_status(value)) is not None
+    }
+    errors = assertion_source.get("errors", [])
+    failed = sorted(name for name, passed in assertions.items() if not passed)
+    if isinstance(errors, list) and errors:
+        failed.append("errors")
+    if not assertions:
+        raise VerificationFailure(f"{family} plan exposes no boolean assertions")
+    if failed:
+        raise VerificationFailure(f"{family} plan assertions failed: {', '.join(failed)}")
+
+    actual_members = plan.get("member_count")
+    expected_members = plan.get("expected_member_count")
+    if (
+        isinstance(actual_members, int)
+        and isinstance(expected_members, int)
+        and actual_members != expected_members
+    ):
+        raise VerificationFailure(
+            f"{family} planned {actual_members} members, expected {expected_members}"
+        )
+
+    counts = plan.get("scientific_counts")
+    if not isinstance(counts, dict):
+        counts = plan.get("counts")
+    if not isinstance(counts, dict):
+        counts = {}
+    if isinstance(actual_members, int):
+        counts = {
+            **counts,
+            "member_count": actual_members,
+            "expected_member_count": expected_members,
+        }
+
+    return {
+        "status": "passed",
+        "command": report["command"],
+        "elapsed_seconds": report["elapsed_seconds"],
+        "exit_code": report["exit_code"],
+        "output_bytes": len(output.encode("utf-8")),
+        "output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),
+        "counts": counts,
+        "assertion_count": len(assertions),
+        "assertions": assertions,
+    }
+
+
 def run_full_plan(repo: Path) -> dict[str, Any]:
     """Run all paper-profile planners without starting computation."""
 
     reports: dict[str, Any] = {}
     for family in FAMILIES:
-        reports[family] = _run_command(
+        raw_report = _run_command(
             [
                 sys.executable,
                 "-m",
@@ -217,8 +696,50 @@ def run_full_plan(repo: Path) -> dict[str, Any]:
                 "--plan-only",
             ],
             cwd=repo,
+            echo_output=False,
         )
+        reports[family] = _summarize_plan_report(family, raw_report)
     return {"status": "passed", "families": reports}
+
+
+def run_quality(repo: Path) -> dict[str, Any]:
+    """Run formatting, lint, import, and public shell syntax gates."""
+
+    reports = {
+        "ruff_check": _run_command(
+            [sys.executable, "-m", "ruff", "check", "."],
+            cwd=repo,
+        ),
+        "ruff_format": _run_command(
+            [sys.executable, "-m", "ruff", "format", "--check", "."],
+            cwd=repo,
+        ),
+        "static_imports": _run_command(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import decaf, decaf.audit, decaf.verification; "
+                    "import decaf.paper.analysis_replay, decaf.paper.render; "
+                    "import decaf.experiments.controlled.cli; "
+                    "import decaf.experiments.imagenet9.cli; "
+                    "import decaf.experiments.attribution.cli; "
+                    "import decaf.experiments.covertype.cli"
+                ),
+            ],
+            cwd=repo,
+        ),
+    }
+    tracked = _run_command(["git", "ls-files", "--", "*.sh"], cwd=repo)
+    shell_scripts = sorted(line for line in str(tracked["output"]).splitlines() if line)
+    for relative in shell_scripts:
+        _run_command(["bash", "-n", relative], cwd=repo)
+    reports["shell_syntax"] = {
+        "status": "passed",
+        "checked_count": len(shell_scripts),
+        "checked_paths": shell_scripts,
+    }
+    return {"status": "passed", "checks": reports}
 
 
 def run_repository_audit(repo: Path, verification: Path) -> dict[str, Any]:
@@ -254,7 +775,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     verification.mkdir(parents=True, exist_ok=True)
     steps: dict[str, Any] = {}
     started_at = utc_now()
+    identity = _git_identity(repo)
     try:
+        if args.mode == "all-cpu" and not identity["tracked_worktree_clean"]:
+            raise VerificationFailure("all-cpu verification requires a clean repository")
+        if args.mode in {"quality", "all-cpu"}:
+            steps["quality"] = run_quality(repo)
         if args.mode in {"analysis-replay", "all-cpu"}:
             steps["analysis_replay"] = run_analysis_replay(
                 repo,
@@ -278,6 +804,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "started_at": started_at,
             "finished_at": utc_now(),
             "gpu_real_shard_verification": "pending",
+            **identity,
             "steps": steps,
             "error": f"{type(error).__name__}: {error}",
         }
@@ -290,6 +817,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "started_at": started_at,
         "finished_at": utc_now(),
         "gpu_real_shard_verification": "pending",
+        **identity,
         "steps": steps,
     }
     atomic_json(verification / "cpu_verification.json", report)
@@ -309,6 +837,7 @@ __all__ = [
     "run_analysis_replay",
     "run_full_plan",
     "run_integration_cpu",
+    "run_quality",
     "run_repository_audit",
     "run_unit",
 ]

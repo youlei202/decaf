@@ -129,9 +129,11 @@ family-specific response columns. Canonical model-metric tables include
 `experiment`, `model_id`, `profile`, `metric`, `value`,
 `n_samples`, and the relevant uncertainty fields.
 
-Every `paper_data` table includes `artifact_id`, `panel_id`, `series`,
-`x`, `y`, `estimate`, `ci_low`, `ci_high`, `n`, and
-`source_sha256` where applicable. Tables may add documented family-specific
-columns, but must not silently drop identity, sample count, or provenance
-columns. Column order, dtypes, null policy, and sort keys are frozen in the
-resolved schema used by the run.
+Every global canonical paper-data table under
+`paper_data/canonical/{figures,tables}` includes `artifact_id`, `panel_id`,
+`series`, `x`, `y`, `estimate`, `ci_low`, `ci_high`, `n`, `source_sha256`, and
+`record_json`. The final field is a portable canonical JSON object preserving
+the asset-specific semantic identity fields. Family-local `paper_data` files
+remain validated source/intermediate schemas and are not claimed to use this
+global renderer schema. Column order, null policy, panel cardinality, source
+lineage, and semantic-contract hashes are frozen in `canonical_receipt.json`.

@@ -68,10 +68,10 @@ Expected static paper-plan counts include:
 ## Reading the result
 
 A verification report records the lane, validated input digests, individual
-checks, elapsed time, and final status. `completed` means every required check
-passed. `completed_with_optional_failures` means required checks passed and
-only declared optional checks failed. `partial` and `failed` are not passing
-results.
+checks, elapsed time, and final status. Its top-level status is `passed` only
+when every required gate succeeds; `failed` is not a passing result. Individual
+experiment run receipts use the separate lifecycle statuses documented in
+`docs/result_schema.md`.
 
 The all-CPU lane is intentionally honest about its boundary. Full real-shard GPU
 verification for controlled, ImageNet-9, and attribution remains pending. Until

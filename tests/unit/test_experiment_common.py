@@ -38,8 +38,7 @@ def test_atomic_json_replaces_complete_document(tmp_path: Path) -> None:
 def test_standard_run_schema_and_terminal_status(tmp_path: Path) -> None:
     context = _context(tmp_path)
     handlers = {
-        stage: (lambda _context, name=stage: {"name": name})
-        for stage in requested_stages("all")
+        stage: (lambda _context, name=stage: {"name": name}) for stage in requested_stages("all")
     }
     assert execute_run(context, handlers) == 0
     expected = {

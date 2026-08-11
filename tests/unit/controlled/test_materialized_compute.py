@@ -137,14 +137,11 @@ def _write_materialized_bundle(
                 "run_bindings": run_bindings,
                 "dependencies": list(member.dependencies),
                 "dependency_artifacts": {
-                    dependency: artifact_digests[dependency]
-                    for dependency in member.dependencies
+                    dependency: artifact_digests[dependency] for dependency in member.dependencies
                 },
                 "input_bindings": {
                     "data_manifest_sha256": run_bindings["data_manifest_sha256"],
-                    "checkpoint_manifest_sha256": run_bindings[
-                        "checkpoint_manifest_sha256"
-                    ],
+                    "checkpoint_manifest_sha256": run_bindings["checkpoint_manifest_sha256"],
                     "checkpoints": checkpoint_inputs,
                     "probability_caches": cache_inputs,
                 },
@@ -262,9 +259,7 @@ def test_checkpoint_binding_universe_rejects_registered_extras(tmp_path: Path) -
     config = _paper_fixture_config()
     context = _prepare_fixture_context(tmp_path, config)
     members = build_members(config)
-    bindings = checkpoint_bindings_from_manifest(
-        context.path / "manifests" / "checkpoints.json"
-    )
+    bindings = checkpoint_bindings_from_manifest(context.path / "manifests" / "checkpoints.json")
     bindings["checkpoints"]["extra"] = {
         "model_id": "extra",
         "logical_path": "checkpoints/c1/extra.pt",

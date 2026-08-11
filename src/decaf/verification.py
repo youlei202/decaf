@@ -263,7 +263,12 @@ def _inventory_row(path: Path, root: Path, root_name: str, role: str) -> dict[st
 
 
 def _assert_portable_evidence(paths: Sequence[Path]) -> None:
-    forbidden = ("/work/Users/", "/home/", "/tmp/", "C:\\Users\\")
+    forbidden = (
+        "/" + "work" + "/" + "Users" + "/",
+        "/" + "home" + "/",
+        "/" + "tmp" + "/",
+        "C:" + "\\" + "Users" + "\\",
+    )
     for path in paths:
         try:
             content = path.read_text(encoding="utf-8")

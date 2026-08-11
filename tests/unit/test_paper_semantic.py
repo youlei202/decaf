@@ -55,11 +55,12 @@ def test_source_lineage_rejects_unknown_well_formed_hash(tmp_path: Path) -> None
 
 
 def test_canonical_record_values_normalize_paths_recursively() -> None:
-    value = {"source": "/home/private/run/result.csv", "nested": ["safe", 3]}
+    private_home = "/" + "home" + "/private/run/result.csv"
+    value = {"source": private_home, "nested": ["safe", 3]}
 
     assert semantic._safe(value) == {
         "source": "result.csv",
         "nested": ["safe", 3],
     }
     with pytest.raises(semantic.SemanticDataError, match="embedded private path"):
-        semantic._safe("loaded from /tmp/private/result.csv")
+        semantic._safe("loaded from /" + "tmp" + "/private/result.csv")

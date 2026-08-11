@@ -20,10 +20,12 @@ assert SPEC is not None and SPEC.loader is not None
 PACKAGE_RELEASE = module_from_spec(SPEC)
 SPEC.loader.exec_module(PACKAGE_RELEASE)
 _archive_repository = PACKAGE_RELEASE._archive_repository
+_validate_analysis_artifacts = PACKAGE_RELEASE._validate_analysis_artifacts
 _require_passed_reports = PACKAGE_RELEASE._require_passed_reports
 _validate_historical_drift = PACKAGE_RELEASE._validate_historical_drift
 _validate_package_manifest = PACKAGE_RELEASE._validate_package_manifest
 _validate_provenance_manifests = PACKAGE_RELEASE._validate_provenance_manifests
+_validate_public_package_payload = PACKAGE_RELEASE._validate_public_package_payload
 _validate_source_snapshot_recovery = PACKAGE_RELEASE._validate_source_snapshot_recovery
 _validate_source_snapshots = PACKAGE_RELEASE._validate_source_snapshots
 _write_package_manifest = PACKAGE_RELEASE._write_package_manifest
@@ -47,14 +49,16 @@ def _git(repository: Path, *arguments: str) -> bytes:
     ).stdout
 
 
-def _passed_steps() -> dict[str, object]:
+def _passed_steps(
+    analysis: dict[str, object] | None = None,
+) -> dict[str, object]:
     families = {
         family: {"status": "passed"}
         for family in ("controlled", "imagenet9", "attribution", "covertype")
     }
     return {
         "quality": {"status": "passed"},
-        "analysis_replay": {"status": "passed"},
+        "analysis_replay": analysis or {"status": "passed"},
         "unit": {"status": "passed"},
         "integration_cpu": {"status": "passed"},
         "full_plan": {"status": "passed", "families": families},
@@ -71,21 +75,306 @@ def _bound_report(payload: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _analysis_report() -> dict[str, object]:
+    return _bound_report(
+        {
+            "status": "passed",
+            "reference_runs_verified": 9,
+            "inputs_materialized": 72,
+            "paper_assets_mapped": 28,
+            "figure_assets_emitted": 12,
+            "figures_regenerated": 11,
+            "figures_source_missing_recorded": 1,
+            "source_missing_recorded": ["figure_01"],
+            "tables_regenerated": 16,
+            "family_replays_completed": 4,
+            "canonical_assets_materialized": 27,
+            "artifact_inventory_count": 60,
+            "headline_assertion_count": 27,
+            "headline_assertions_status": "passed",
+            "model_inference_performed": False,
+            "paper_outputs_root": "verification_root/paper_outputs",
+        }
+    )
+
+
+def _artifact_record(
+    verification: Path,
+    relative: str,
+    role: str,
+) -> dict[str, object]:
+    path = verification / relative
+    return {
+        "portable_path": f"verification_root/{relative}",
+        "source_root": "verification_root",
+        "relative_path": relative,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "size_bytes": path.stat().st_size,
+        "role": role,
+    }
+
+
+def _analysis_artifact_fixture(
+    tmp_path: Path,
+) -> tuple[Path, dict[str, object]]:
+    verification = tmp_path / "verification"
+    verification.mkdir(parents=True)
+    manifest = load_visual_manifest(REPOSITORY / "paper/visual_manifest.yaml")
+    schema_sha256 = hashlib.sha256(b"canonical-schema").hexdigest()
+    canonical_rows: list[dict[str, object]] = []
+    diff_rows: list[dict[str, object]] = []
+    generated_paths: list[str] = []
+    canonical_paths: list[str] = []
+
+    for asset in manifest.assets.values():
+        subdirectory = "figures" if asset.kind == "figure" else "tables"
+        generated_relative = f"paper_outputs/generated/{subdirectory}/{Path(asset.tex_target).name}"
+        generated = verification / generated_relative
+        generated.parent.mkdir(parents=True, exist_ok=True)
+        generated.write_text(f"% generated {asset.asset_id}\n", encoding="utf-8")
+        generated_paths.append(generated_relative)
+        generated_sha256 = hashlib.sha256(generated.read_bytes()).hexdigest()
+
+        canonical_relative = ""
+        canonical_sha256 = ""
+        semantic_sha256 = ""
+        row_count: int | str = ""
+        panel_cardinality: dict[str, int] = {}
+        if asset.status != "source_missing":
+            canonical_relative = f"paper_outputs/canonical/{subdirectory}/{asset.asset_id}.csv"
+            canonical = verification / canonical_relative
+            canonical.parent.mkdir(parents=True, exist_ok=True)
+            canonical.write_text(
+                f"artifact_id,value\n{asset.asset_id},1\n",
+                encoding="utf-8",
+            )
+            canonical_paths.append(canonical_relative)
+            canonical_sha256 = hashlib.sha256(canonical.read_bytes()).hexdigest()
+            semantic_sha256 = hashlib.sha256(f"contract:{asset.asset_id}".encode()).hexdigest()
+            row_count = 1
+            panel_cardinality = {"main": 1}
+            canonical_rows.append(
+                {
+                    "asset_id": asset.asset_id,
+                    "kind": asset.kind,
+                    "path": (f"paper_data/canonical/{subdirectory}/{asset.asset_id}.csv"),
+                    "sha256": canonical_sha256,
+                    "size_bytes": canonical.stat().st_size,
+                    "semantic_contract_sha256": semantic_sha256,
+                    "schema_sha256": schema_sha256,
+                    "row_count": row_count,
+                    "panel_count": 1,
+                    "panel_cardinality": panel_cardinality,
+                    "source_sha256s": [],
+                    "resolved_source_sha256s": [],
+                    "source_lineage": {},
+                    "representative_case_ids": [],
+                }
+            )
+        comparison = (
+            "source_missing_recorded"
+            if asset.status == "source_missing"
+            else (
+                "regenerated_semantic_geometry"
+                if asset.kind == "figure"
+                else "regenerated_semantic_table"
+            )
+        )
+        diff_rows.append(
+            {
+                "asset_id": asset.asset_id,
+                "kind": asset.kind,
+                "number": asset.number,
+                "manifest_status": asset.status,
+                "generated_path": generated_relative,
+                "generated_sha256": generated_sha256,
+                "generated_bytes": generated.stat().st_size,
+                "comparison_status": comparison,
+                "canonical_path": canonical_relative,
+                "canonical_sha256": canonical_sha256,
+                "semantic_contract_sha256": semantic_sha256,
+                "schema_sha256": schema_sha256 if canonical_relative else "",
+                "row_count": row_count,
+                "panel_cardinality": json.dumps(
+                    panel_cardinality, sort_keys=True, separators=(",", ":")
+                ),
+            }
+        )
+
+    canonical_receipt = {
+        "schema_version": 1,
+        "status": "completed",
+        "required_columns": ["artifact_id", "record_json"],
+        "schema_sha256": schema_sha256,
+        "artifact_count": len(canonical_rows),
+        "contract_set_sha256": hashlib.sha256(b"contract-set").hexdigest(),
+        "artifacts": canonical_rows,
+    }
+    canonical_receipt_path = verification / "paper_outputs/receipts/canonical_receipt.json"
+    canonical_receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(canonical_receipt_path, canonical_receipt)
+
+    family_counts = {
+        "controlled": 19,
+        "imagenet9": 13,
+        "attribution": 39,
+        "covertype": 25,
+    }
+    invocation_path = "family_replays/invocation-test"
+    family_receipt = {
+        "schema_version": 2,
+        "status": "completed",
+        "invocation_path": invocation_path,
+        "family_count": 4,
+        "families": [
+            {
+                "family": family,
+                "path": f"{invocation_path}/{family}",
+                "status": "completed",
+                "stages": [
+                    {"stage": "analyze", "status": "completed"},
+                    {"stage": "paper", "status": "completed"},
+                ],
+                "analysis": {},
+                "paper": {},
+                "contract": {},
+                "artifacts": [{} for _ in range(count)],
+            }
+            for family, count in family_counts.items()
+        ],
+    }
+    family_receipt_path = verification / "paper_outputs/receipts/family_replay_receipt.json"
+    _write_json(family_receipt_path, family_receipt)
+
+    assertions = {
+        str(spec["id"]): {
+            "asset_id": asset.asset_id,
+            "status": "verified",
+        }
+        for asset in manifest.assets.values()
+        for spec in asset.headline_assertions
+    }
+    headline = {
+        "schema_version": 1,
+        "status": "passed",
+        "assertion_count": len(assertions),
+        "verified_count": len(assertions),
+        "source_missing_count": 0,
+        "assertions": assertions,
+    }
+    _write_json(verification / "headline_assertions.json", headline)
+
+    with (verification / "paper_artifact_diff.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=PACKAGE_RELEASE.PAPER_DIFF_COLUMNS,
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        writer.writerows(diff_rows)
+
+    tracked_runs = load_reference_runs(REPOSITORY / "manifests/reference_runs")
+    runs = [
+        {
+            "run_id": run.run_id,
+            "family": run.family,
+            "scientific_status": run.scientific_status,
+            "archive_filename": run.archive_filename,
+            "archive_sha256": run.archive_sha256,
+            "archive_size_bytes": run.archive_size_bytes,
+            "archive_member_count": run.archive_member_count,
+        }
+        for run in (tracked_runs[run_id] for run_id in sorted(tracked_runs))
+    ]
+    requested = {run_id: set(run.analysis_inputs) for run_id, run in tracked_runs.items()}
+    for asset in manifest.assets.values():
+        for raw in asset.raw_inputs:
+            requested[raw.run_id].add(raw.member)
+    inputs = [
+        {"run_id": run_id, "requested_suffix": suffix}
+        for run_id in sorted(requested)
+        for suffix in sorted(requested[run_id])
+    ]
+    nested_canonical = {
+        **canonical_receipt,
+        "path": "paper_data/canonical/canonical_receipt.json",
+        "sha256": hashlib.sha256(canonical_receipt_path.read_bytes()).hexdigest(),
+        "size_bytes": canonical_receipt_path.stat().st_size,
+    }
+    replay_receipt = {
+        "schema_version": 2,
+        "paper_data_directory": "paper_data",
+        "runs": runs,
+        "inputs": inputs,
+        "representative_cases": {
+            asset_id: {"status": "verified"} for asset_id in ("figure_02", "figure_03", "figure_04")
+        },
+        "headline_assertions": assertions,
+        "assets": {asset_id: {} for asset_id in manifest.assets},
+        "family_replay": family_receipt,
+        "canonical": nested_canonical,
+    }
+    replay_receipt_path = verification / "paper_outputs/receipts/replay_receipt.json"
+    _write_json(replay_receipt_path, replay_receipt)
+
+    inventory = [
+        *[
+            _artifact_record(verification, relative, "generated_tex")
+            for relative in generated_paths
+        ],
+        *[
+            _artifact_record(verification, relative, "canonical_csv")
+            for relative in canonical_paths
+        ],
+        _artifact_record(
+            verification,
+            "paper_outputs/receipts/canonical_receipt.json",
+            "canonical_receipt",
+        ),
+        _artifact_record(
+            verification,
+            "paper_outputs/receipts/family_replay_receipt.json",
+            "family_replay_receipt",
+        ),
+        _artifact_record(
+            verification,
+            "paper_outputs/receipts/replay_receipt.json",
+            "replay_receipt",
+        ),
+        _artifact_record(verification, "headline_assertions.json", "headline_assertions"),
+        _artifact_record(verification, "paper_artifact_diff.csv", "paper_artifact_diff"),
+    ]
+    inventory.sort(key=lambda row: str(row["portable_path"]))
+    hashes_by_role = {str(row["role"]): str(row["sha256"]) for row in inventory}
+    analysis = {
+        **_analysis_report(),
+        "artifact_inventory": inventory,
+        "artifact_inventory_sha256": hashlib.sha256(
+            json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        "replay_receipt_sha256": hashes_by_role["replay_receipt"],
+        "family_replay_receipt_sha256": hashes_by_role["family_replay_receipt"],
+        "canonical_receipt_sha256": hashes_by_role["canonical_receipt"],
+        "headline_assertions_sha256": hashes_by_role["headline_assertions"],
+        "paper_artifact_diff_sha256": hashes_by_role["paper_artifact_diff"],
+    }
+    return verification, analysis
+
+
 def test_release_reports_require_every_structured_gate(tmp_path: Path) -> None:
+    analysis_report = _analysis_report()
+    _write_json(tmp_path / "analysis_replay.json", analysis_report)
     _write_json(
-        tmp_path / "analysis_replay.json",
+        tmp_path / "cpu_verification.json",
         _bound_report(
             {
                 "status": "passed",
-                "reference_runs_verified": 9,
-                "figures_regenerated": 12,
-                "tables_regenerated": 16,
+                "mode": "all-cpu",
+                "steps": _passed_steps(analysis_report),
             }
         ),
-    )
-    _write_json(
-        tmp_path / "cpu_verification.json",
-        _bound_report({"status": "passed", "mode": "all-cpu", "steps": _passed_steps()}),
     )
     _write_json(tmp_path / "repository_audit.json", {"passed": True})
 
@@ -96,23 +385,14 @@ def test_release_reports_require_every_structured_gate(tmp_path: Path) -> None:
 
 
 def test_release_reports_fail_when_a_family_plan_is_absent(tmp_path: Path) -> None:
-    steps = _passed_steps()
+    analysis_report = _analysis_report()
+    steps = _passed_steps(analysis_report)
     full_plan = steps["full_plan"]
     assert isinstance(full_plan, dict)
     families = full_plan["families"]
     assert isinstance(families, dict)
     del families["attribution"]
-    _write_json(
-        tmp_path / "analysis_replay.json",
-        _bound_report(
-            {
-                "status": "passed",
-                "reference_runs_verified": 9,
-                "figures_regenerated": 12,
-                "tables_regenerated": 16,
-            }
-        ),
-    )
+    _write_json(tmp_path / "analysis_replay.json", analysis_report)
     _write_json(
         tmp_path / "cpu_verification.json",
         _bound_report({"status": "passed", "mode": "all-cpu", "steps": steps}),
@@ -124,24 +404,93 @@ def test_release_reports_fail_when_a_family_plan_is_absent(tmp_path: Path) -> No
 
 
 def test_release_reports_reject_a_stale_repository_identity(tmp_path: Path) -> None:
-    _write_json(
-        tmp_path / "analysis_replay.json",
-        _bound_report(
-            {
-                "status": "passed",
-                "reference_runs_verified": 9,
-                "figures_regenerated": 12,
-                "tables_regenerated": 16,
-            }
-        ),
+    analysis_report = _analysis_report()
+    _write_json(tmp_path / "analysis_replay.json", analysis_report)
+    stale_cpu = _bound_report(
+        {
+            "status": "passed",
+            "mode": "all-cpu",
+            "steps": _passed_steps(analysis_report),
+        }
     )
-    stale_cpu = _bound_report({"status": "passed", "mode": "all-cpu", "steps": _passed_steps()})
     stale_cpu["repository_commit"] = "c" * 40
     _write_json(tmp_path / "cpu_verification.json", stale_cpu)
     _write_json(tmp_path / "repository_audit.json", {"passed": True})
 
     with pytest.raises(RuntimeError, match="CPU verification.*packaged commit"):
         _require_passed_reports(tmp_path, REPOSITORY_IDENTITY)
+
+
+def test_analysis_artifact_inventory_closes_and_rejects_tamper(
+    tmp_path: Path,
+) -> None:
+    verification, analysis = _analysis_artifact_fixture(tmp_path)
+
+    inventory = _validate_analysis_artifacts(analysis, verification, REPOSITORY)
+
+    assert len(inventory) == 60
+    assert (
+        sum(str(record["relative_path"]).startswith("paper_outputs/") for record in inventory) == 58
+    )
+    canonical = verification / "paper_outputs/canonical/figures/figure_02.csv"
+    canonical.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="bytes differ from inventory"):
+        _validate_analysis_artifacts(analysis, verification, REPOSITORY)
+
+
+def test_analysis_artifacts_reject_extra_symlink_and_escaping_path(
+    tmp_path: Path,
+) -> None:
+    extra_verification, extra_analysis = _analysis_artifact_fixture(tmp_path / "extra")
+    (extra_verification / "paper_outputs/extra.txt").write_text("stale\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="exact 58-file allowlist"):
+        _validate_analysis_artifacts(extra_analysis, extra_verification, REPOSITORY)
+
+    link_verification, link_analysis = _analysis_artifact_fixture(tmp_path / "link")
+    (link_verification / "paper_outputs/link.txt").symlink_to(
+        link_verification / "headline_assertions.json"
+    )
+    with pytest.raises(RuntimeError, match="contain a symlink"):
+        _validate_analysis_artifacts(link_analysis, link_verification, REPOSITORY)
+
+    path_verification, path_analysis = _analysis_artifact_fixture(tmp_path / "path")
+    forged = json.loads(json.dumps(path_analysis))
+    forged_record = forged["artifact_inventory"][0]
+    forged_record["relative_path"] = "../escape"
+    forged_record["portable_path"] = "verification_root/../escape"
+    forged["artifact_inventory_sha256"] = hashlib.sha256(
+        json.dumps(forged["artifact_inventory"], sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    with pytest.raises(RuntimeError, match="contained relative path"):
+        _validate_analysis_artifacts(forged, path_verification, REPOSITORY)
+
+
+def test_public_package_payload_rejects_private_paths_and_pdfs(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "package"
+    repository = package / "repository"
+    verification = package / "verification"
+    repository.mkdir(parents=True)
+    verification.mkdir()
+    (repository / "README.md").write_text("portable\n", encoding="utf-8")
+    (verification / "report.json").write_text('{"status":"passed"}\n', encoding="utf-8")
+
+    assert _validate_public_package_payload(package)["status"] == "passed"
+    (verification / "report.json").write_text(
+        '{"path":"/' + "home" + '/private"}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="private absolute path"):
+        _validate_public_package_payload(package)
+    (verification / "report.json").write_text('{"status":"passed"}\n', encoding="utf-8")
+    (verification / "report.json").write_text("\u673a\u5bc6\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="contains CJK text"):
+        _validate_public_package_payload(package)
+    (verification / "report.json").write_text('{"status":"passed"}\n', encoding="utf-8")
+    (repository / "forbidden.pdf").write_bytes(b"%PDF")
+    with pytest.raises(RuntimeError, match="contains a PDF"):
+        _validate_public_package_payload(package)
 
 
 def test_drift_receipt_recomputes_live_tree_and_rejects_tamper(

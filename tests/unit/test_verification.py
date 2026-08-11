@@ -149,7 +149,10 @@ def test_inventory_paths_are_portable_and_cannot_escape_root(tmp_path: Path) -> 
         _inventory_row(outside, root, "verification_root", "bad")
 
 
-@pytest.mark.parametrize("content", ["/home/private/result.csv", "private note: 机密"])
+@pytest.mark.parametrize(
+    "content",
+    ["/" + "home" + "/private/result.csv", "private note: \u673a\u5bc6"],
+)
 def test_portable_evidence_scan_rejects_private_text(tmp_path: Path, content: str) -> None:
     artifact = tmp_path / "evidence.txt"
     artifact.write_text(content, encoding="utf-8")

@@ -367,15 +367,11 @@ def prepared_run_bindings(
             raise ValueError("Controlled checkpoint canonical inventory must be an object")
         if canonical.get("sha256") != sha256_file(paths["checkpoint_inventory_sha256"]):
             raise ValueError("Controlled checkpoint inventory fingerprint mismatch")
-        inventory = yaml.safe_load(
-            paths["checkpoint_inventory_sha256"].read_text(encoding="utf-8")
-        )
+        inventory = yaml.safe_load(paths["checkpoint_inventory_sha256"].read_text(encoding="utf-8"))
         raw_groups = inventory.get("groups") if isinstance(inventory, Mapping) else None
         if not isinstance(raw_groups, list):
             raise ValueError("canonical Controlled checkpoint inventory has no groups")
-        groups = {
-            str(group.get("id")): group for group in raw_groups if isinstance(group, Mapping)
-        }
+        groups = {str(group.get("id")): group for group in raw_groups if isinstance(group, Mapping)}
         raw_items = checkpoint_manifest.get("items")
         if not isinstance(raw_items, list):
             raise ValueError("prepared Controlled checkpoint manifest has no items")
@@ -391,9 +387,7 @@ def prepared_run_bindings(
             if groups.get(group_id, {}).get("portable_registry_sha256") != items[item_id].get(
                 "portable_registry_sha256"
             ):
-                raise ValueError(
-                    f"prepared Controlled checkpoint registry mismatch: {item_id}"
-                )
+                raise ValueError(f"prepared Controlled checkpoint registry mismatch: {item_id}")
     bindings = {
         "configuration_sha256": config_digest,
         "member_contract_sha256": contract_digest,
@@ -482,9 +476,7 @@ def validate_checkpoint_binding_universe(
                 f"checkpoints/c0/{model_id_value}.pt",
                 None,
             )
-            expected_caches[model_id_value] = (
-                f"probability_caches/c0/{model_id_value}.npy"
-            )
+            expected_caches[model_id_value] = f"probability_caches/c0/{model_id_value}.npy"
         elif member.phase in {"c1_train", "c2_train"}:
             family = "c1" if member.phase == "c1_train" else "c2"
             for output in member.metadata.get("checkpoint_outputs", ()):
@@ -611,8 +603,7 @@ def member_checkpoint_contract(
         checkpoint_inputs.append(checkpoint(model_id_value))
     elif member.phase in {"c1_train", "c2_train"}:
         output_ids = [
-            Path(str(path)).stem
-            for path in member.metadata.get("checkpoint_outputs", ())
+            Path(str(path)).stem for path in member.metadata.get("checkpoint_outputs", ())
         ]
         if not output_ids:
             raise ValueError(
@@ -621,9 +612,7 @@ def member_checkpoint_contract(
         for identifier in output_ids:
             record = checkpoint(identifier)
             if record.get("producer_member_id") != member.member_id:
-                raise ValueError(
-                    f"Controlled checkpoint producer binding mismatch: {identifier}"
-                )
+                raise ValueError(f"Controlled checkpoint producer binding mismatch: {identifier}")
             produced.append(record)
     else:
         raise ValueError(f"unknown Controlled member phase: {member.phase}")

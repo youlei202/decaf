@@ -92,13 +92,9 @@ def panel_frame(
 def _module_f_bootstrap(bundle: ControlledReferenceBundle) -> pd.DataFrame:
     samples = bundle["c1_bootstrap"]
     primary_geometry = pd.to_numeric(samples["primary_geometry"], errors="coerce").eq(1.0)
-    primary_geometry |= samples["primary_geometry"].astype(str).str.lower().isin(
-        {"true", "yes"}
-    )
+    primary_geometry |= samples["primary_geometry"].astype(str).str.lower().isin({"true", "yes"})
     primary = samples.loc[
-        samples["module"].eq("F")
-        & primary_geometry
-        & samples["factor"].eq("floor_color")
+        samples["module"].eq("F") & primary_geometry & samples["factor"].eq("floor_color")
     ]
     per_model = primary.groupby(["variant", "architecture", "model_id"], as_index=False, sort=True)[
         "F"

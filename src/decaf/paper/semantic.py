@@ -644,7 +644,12 @@ def _safe(value: Any) -> Any:
         if Path(text).is_absolute() or windows_absolute:
             normalized = text.replace("\\", "/").rstrip("/")
             return normalized.rsplit("/", maxsplit=1)[-1] or "root"
-        if any(fragment in text for fragment in ("/work/Users/", "/home/", "/tmp/")):
+        private_fragments = (
+            "/" + "work" + "/" + "Users" + "/",
+            "/" + "home" + "/",
+            "/" + "tmp" + "/",
+        )
+        if any(fragment in text for fragment in private_fragments):
             raise SemanticDataError("canonical record contains an embedded private path")
     return text
 

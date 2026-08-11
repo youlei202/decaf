@@ -39,8 +39,9 @@ dataset roots described in `manifests/datasets/`.
 
 Expected static paper-plan counts include:
 
-- controlled: 30 base models, 180 factor-model units, 88 selected evidence
-  checkpoints, and 30 context-swap models;
+- controlled: 30 base models, 180 factor-model units, 44 C1 factory jobs covering
+  52 evidence, 18 causal, and 18 fragility checkpoints, 316 C1 measurements,
+  and 30 context-swap models with 30 dependent evaluations;
 - ImageNet-9: 72 model descriptors, 32 deep models, and 768 sealed deep pairs;
 - attribution: three aligned architectures, with DINOv2-g and PartImageNet
   boundary work in explicitly requested profiles;

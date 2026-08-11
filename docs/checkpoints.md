@@ -28,6 +28,18 @@ reference packages retain manifests and individual selected-checkpoint hashes,
 but not the model bytes or optimizer state. Regenerate these models or provide
 an authorized sealed bundle; there is no public download claim.
 
+Paper preparation expects `model_manifest.csv`,
+`endpoint_behavior_model_manifest.csv`, and `context_swap_model_manifest.csv`
+under `$DECAF_CACHE_ROOT/checkpoints/controlled`. C1 and C2 rows include
+`model_id`, `checkpoint_path`, `checkpoint_sha256`, and
+`producer_member_id`; C1 additionally records its module, variant,
+architecture, seed, and selection flag. The loader requires exact configured
+IDs, validates every checkpoint byte, and checks that each producer points to
+the corresponding C1 or C2 training member. The 52 evidence snapshots come
+from eight trajectories, so C1 has 44 factory jobs rather than 88 independent
+training jobs. C0 remains strictly no-retraining and also verifies its frozen
+probability-cache hashes.
+
 ## ImageNet-9 family
 
 The model zoo contains 72 descriptors: 24 upstream pretrained models (12

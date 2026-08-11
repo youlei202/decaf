@@ -123,7 +123,7 @@ def validate_c0_manifest(frame: pd.DataFrame, *, expected_count: int = 30) -> pd
 def validate_c1_manifest(
     frame: pd.DataFrame,
     *,
-    expected_counts: Mapping[str, int] = {"E": 52, "C": 18, "F": 18},
+    expected_counts: Mapping[str, int] | None = None,
 ) -> pd.DataFrame:
     """Select and validate the 88 frozen C1 measurement checkpoints."""
 
@@ -142,7 +142,8 @@ def validate_c1_manifest(
         raise ValueError(f"C1 model manifest is missing columns: {sorted(missing)}")
     selected = frame.loc[_truthy(frame["selected_for_b200"])].copy()
     counts = selected.groupby("module", sort=True)["model_id"].nunique().to_dict()
-    expected = {str(key): int(value) for key, value in expected_counts.items()}
+    expected_source = {"E": 52, "C": 18, "F": 18} if expected_counts is None else expected_counts
+    expected = {str(key): int(value) for key, value in expected_source.items()}
     if counts != expected or len(selected) != sum(expected.values()):
         raise ValueError(
             f"C1 selected checkpoint counts changed: expected {expected}, found {counts}"
@@ -160,7 +161,12 @@ def validate_c1_manifest(
     return selected.sort_values("model_id", kind="mergesort").reset_index(drop=True)
 
 
-def validate_c2_model_grid(frame: pd.DataFrame, *, expected_count: int = 30) -> pd.DataFrame:
+def validate_c2_model_grid(
+    frame: pd.DataFrame,
+    *,
+    expected_count: int = 30,
+    expected_records: Sequence[ModelRecord] | None = None,
+) -> pd.DataFrame:
     """Validate the complete task/architecture/seed contradiction grid."""
 
     required = {"model_id", "task", "architecture", "seed"}
@@ -176,16 +182,18 @@ def validate_c2_model_grid(frame: pd.DataFrame, *, expected_count: int = 30) -> 
             strict=True,
         )
     )
-    expected = {
-        (record.task, record.architecture, record.seed)
-        for record in expected_contradiction_models()
-    }
+    registry = (
+        expected_contradiction_models() if expected_records is None else tuple(expected_records)
+    )
+    expected = {(record.task, record.architecture, record.seed) for record in registry}
     if (
         len(rows) != int(expected_count)
         or keys != expected
         or rows["model_id"].nunique() != len(rows)
     ):
-        raise ValueError("C2 table does not contain the registered 30-model grid")
+        raise ValueError(
+            f"C2 table does not contain the registered {int(expected_count)}-model grid"
+        )
     return rows.sort_values("model_id", kind="mergesort").reset_index(drop=True)
 
 
@@ -206,6 +214,96 @@ def verify_checkpoint_file(
     if sha256_file(source) != digest:
         raise ValueError(f"{label} SHA256 mismatch")
     return source
+
+
+def _manifest_checkpoint_path(manifest: Path, raw_path: Any) -> Path:
+    path = Path(str(raw_path))
+    return path if path.is_absolute() else manifest.parent / path
+
+
+def validate_c1_checkpoint_bundle(
+    manifest_path: str | Path,
+    expected_checkpoints: Sequence[Mapping[str, Any]],
+) -> pd.DataFrame:
+    """Validate exact C1 identities, producer jobs, and checkpoint bytes."""
+
+    source = Path(manifest_path).resolve(strict=True)
+    expected_by_id = {str(row["model_id"]): row for row in expected_checkpoints}
+    expected_counts = {
+        module: sum(str(row["module"]) == module for row in expected_checkpoints)
+        for module in ("E", "C", "F")
+    }
+    frame = pd.read_csv(source)
+    if "producer_member_id" not in frame:
+        raise ValueError("C1 model manifest is missing columns: ['producer_member_id']")
+    rows = validate_c1_manifest(frame, expected_counts=expected_counts)
+    if set(rows["model_id"].astype(str)) != set(expected_by_id):
+        raise ValueError("C1 manifest does not contain the configured selected checkpoint IDs")
+    if rows["checkpoint_path"].astype(str).duplicated().any():
+        raise ValueError("C1 checkpoint paths must be unique")
+    for row in rows.itertuples(index=False):
+        model_id_value = str(row.model_id)
+        expected = expected_by_id[model_id_value]
+        identity = (
+            str(row.module) == str(expected["module"])
+            and str(row.variant) == str(expected["variant"])
+            and str(row.architecture) == str(expected["architecture"])
+            and int(row.seed) == int(expected["seed"])
+        )
+        if not identity:
+            raise ValueError(f"C1 checkpoint metadata mismatch: {model_id_value}")
+        expected_producer = (
+            f"c1_train__{expected['trajectory_id']}"
+            if str(expected["module"]) == "E"
+            else f"c1_train__{model_id_value}"
+        )
+        if str(row.producer_member_id) != expected_producer:
+            raise ValueError(f"C1 checkpoint producer mismatch: {model_id_value}")
+        verify_checkpoint_file(
+            _manifest_checkpoint_path(source, row.checkpoint_path),
+            str(row.checkpoint_sha256),
+            label=f"C1 {model_id_value} checkpoint",
+        )
+    rows.attrs["byte_identity_verified"] = True
+    return rows
+
+
+def validate_c2_checkpoint_bundle(
+    manifest_path: str | Path,
+    expected_records: Sequence[ModelRecord] | None = None,
+) -> pd.DataFrame:
+    """Validate the exact C2 grid, producer jobs, and checkpoint bytes."""
+
+    source = Path(manifest_path).resolve(strict=True)
+    registry = (
+        expected_contradiction_models() if expected_records is None else tuple(expected_records)
+    )
+    frame = pd.read_csv(source)
+    required = {"checkpoint_path", "checkpoint_sha256", "producer_member_id"}
+    missing = required - set(frame)
+    if missing:
+        raise ValueError(f"C2 model manifest is missing columns: {sorted(missing)}")
+    rows = validate_c2_model_grid(
+        frame,
+        expected_count=len(registry),
+        expected_records=registry,
+    )
+    expected_by_id = {record.model_id: record for record in registry}
+    if set(rows["model_id"].astype(str)) != set(expected_by_id):
+        raise ValueError("C2 manifest does not contain the configured model IDs")
+    if rows["checkpoint_path"].astype(str).duplicated().any():
+        raise ValueError("C2 checkpoint paths must be unique")
+    for row in rows.itertuples(index=False):
+        model_id_value = str(row.model_id)
+        if str(row.producer_member_id) != f"c2_train__{model_id_value}":
+            raise ValueError(f"C2 checkpoint producer mismatch: {model_id_value}")
+        verify_checkpoint_file(
+            _manifest_checkpoint_path(source, row.checkpoint_path),
+            str(row.checkpoint_sha256),
+            label=f"C2 {model_id_value} checkpoint",
+        )
+    rows.attrs["byte_identity_verified"] = True
+    return rows
 
 
 def validate_c0_no_retraining_bundle(manifest_path: str | Path) -> pd.DataFrame:
@@ -237,7 +335,9 @@ __all__ = [
     "model_id",
     "validate_c0_manifest",
     "validate_c0_no_retraining_bundle",
+    "validate_c1_checkpoint_bundle",
     "validate_c1_manifest",
+    "validate_c2_checkpoint_bundle",
     "validate_c2_model_grid",
     "verify_checkpoint_file",
 ]

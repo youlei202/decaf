@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import shutil
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,12 +21,14 @@ from decaf.core.receipts import (
     write_member_receipt,
 )
 from decaf.experiments.common import RunContext, atomic_text
-from decaf.experiments.controlled.models import expected_base_models
+from decaf.experiments.controlled.models import SHA256_PATTERN, expected_base_models
 from decaf.experiments.controlled.protocols import (
     analytic_context_mixture,
     decompose_score_trajectory,
 )
 from decaf.experiments.controlled.train import (
+    c1_checkpoint_producers,
+    c1_factory_training_jobs,
     c2_training_jobs,
     selected_c1_checkpoints,
 )
@@ -52,6 +58,27 @@ class PlanMember:
             "output": self.output,
             **dict(self.metadata),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class MaterializedMemberArtifact:
+    """One hash-verified accelerator artifact registered for ingestion."""
+
+    member_id: str
+    output: str
+    source: Path
+    size: int
+    sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class MaterializedMemberBundle:
+    """Validated materialized accelerator-member bundle."""
+
+    root: Path
+    manifest: Path
+    producer_execution_class: str
+    artifacts: Mapping[str, MaterializedMemberArtifact]
 
 
 def _safe_token(value: Any) -> str:
@@ -101,6 +128,26 @@ def build_members(config: Mapping[str, Any]) -> tuple[PlanMember, ...]:
             )
 
     endpoint = config["endpoint_behavior"]
+    c1_training = c1_factory_training_jobs(endpoint)
+    c1_producers = c1_checkpoint_producers(endpoint)
+    for job in c1_training:
+        members.append(
+            PlanMember(
+                member_id=job.member_id,
+                phase="c1_train",
+                resource="accelerator",
+                seed=job.seed,
+                output=f"raw/c1/training/{job.model_id}.json",
+                metadata={
+                    "family": "C1",
+                    "model_id": job.model_id,
+                    "module": job.module,
+                    "task": job.task,
+                    "architecture": job.architecture,
+                    "checkpoint_outputs": list(job.outputs),
+                },
+            )
+        )
     passes = endpoint["passes"]
     for checkpoint in selected_c1_checkpoints(endpoint):
         for pass_name in sorted(passes):
@@ -113,6 +160,7 @@ def build_members(config: Mapping[str, Any]) -> tuple[PlanMember, ...]:
                         resource="accelerator",
                         seed=int(checkpoint["seed"]),
                         output=(f"raw/c1/{pass_name}/{checkpoint['model_id']}/{factor}.json"),
+                        dependencies=(c1_producers[str(checkpoint["model_id"])],),
                         metadata={
                             "family": "C1",
                             "pass": pass_name,
@@ -140,6 +188,7 @@ def build_members(config: Mapping[str, Any]) -> tuple[PlanMember, ...]:
                     "model_id": job.model_id,
                     "task": job.task,
                     "architecture": job.architecture,
+                    "checkpoint_outputs": list(job.outputs),
                 },
             )
         )
@@ -163,7 +212,13 @@ def build_members(config: Mapping[str, Any]) -> tuple[PlanMember, ...]:
             )
         )
 
-    phase_order = {"c0_evaluate": 0, "c1_measure": 1, "c2_train": 2, "c2_evaluate": 3}
+    phase_order = {
+        "c0_evaluate": 0,
+        "c1_train": 1,
+        "c1_measure": 2,
+        "c2_train": 3,
+        "c2_evaluate": 4,
+    }
     members.sort(key=lambda member: (phase_order[member.phase], member.member_id))
     identifiers = [member.member_id for member in members]
     outputs = [member.output for member in members]
@@ -175,9 +230,15 @@ def build_members(config: Mapping[str, Any]) -> tuple[PlanMember, ...]:
     if len(receipts) != len(set(receipts)):
         raise ValueError("controlled plan produced duplicate receipt paths")
     known = set(identifiers)
+    positions = {identifier: index for index, identifier in enumerate(identifiers)}
     for member in members:
         if not set(member.dependencies).issubset(known):
             raise ValueError(f"member {member.member_id} has an unknown dependency")
+        if any(
+            positions[dependency] >= positions[member.member_id]
+            for dependency in member.dependencies
+        ):
+            raise ValueError(f"member {member.member_id} is not topologically ordered")
     return tuple(members)
 
 
@@ -197,6 +258,7 @@ def plan_counts(config: Mapping[str, Any], members: Sequence[PlanMember]) -> dic
         "causal_checkpoints": module_counts["C"],
         "fragility_checkpoints": module_counts["F"],
         "endpoint_behavior_checkpoints": len(checkpoints),
+        "endpoint_behavior_training_jobs": sum(member.phase == "c1_train" for member in members),
         "endpoint_behavior_units_per_pass": sum(
             member.phase == "c1_measure" and member.metadata.get("pass") == "pass2"
             for member in members
@@ -209,6 +271,25 @@ def plan_counts(config: Mapping[str, Any], members: Sequence[PlanMember]) -> dic
     return {key: int(value) for key, value in counts.items()}
 
 
+def configuration_sha256(config: Mapping[str, Any]) -> str:
+    """Fingerprint the portable scientific configuration, excluding its path."""
+
+    payload = {key: value for key, value in config.items() if key != "_source"}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def member_contract_sha256(members: Sequence[PlanMember]) -> str:
+    """Fingerprint every scheduled member, dependency, and declared output."""
+
+    encoded = json.dumps(
+        [member.as_dict() for member in members],
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def write_jobs_manifest(path: str | Path, members: Sequence[PlanMember]) -> Path:
     """Atomically persist the sorted JSONL schedule contract."""
 
@@ -219,6 +300,170 @@ def write_jobs_manifest(path: str | Path, members: Sequence[PlanMember]) -> Path
     )
     atomic_text(destination, text)
     return destination
+
+
+def resolve_materialized_output_root(
+    config: Mapping[str, Any],
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Resolve the externally produced accelerator bundle from a named variable."""
+
+    execution = config.get("execution", {})
+    if not isinstance(execution, Mapping):
+        raise ValueError("controlled execution config must be a mapping")
+    variable = str(
+        execution.get("materialized_root_environment", "DECAF_CONTROLLED_GPU_OUTPUT_ROOT")
+    )
+    env = os.environ if environment is None else environment
+    raw_root = env.get(variable)
+    if not raw_root:
+        raise RuntimeError(
+            f"{variable} is required for paper compute; it must identify a "
+            "hash-registered materialized accelerator bundle"
+        )
+    root = Path(raw_root).expanduser().resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"materialized Controlled output root is missing: {root}")
+    return root
+
+
+def _contained_file(root: Path, relative_value: str, *, label: str) -> Path:
+    relative = Path(relative_value)
+    if relative.is_absolute() or not relative.parts:
+        raise ValueError(f"{label} path must be relative")
+    candidate = (root / relative).resolve(strict=True)
+    try:
+        candidate.relative_to(root)
+    except ValueError as error:
+        raise ValueError(f"{label} path escapes the materialized root") from error
+    if not candidate.is_file():
+        raise ValueError(f"{label} path is not a regular file: {relative_value}")
+    return candidate
+
+
+def validate_materialized_member_bundle(
+    root: str | Path,
+    members: Sequence[PlanMember],
+    *,
+    config_sha256: str,
+    manifest_relative: str = "manifests/members.json",
+) -> MaterializedMemberBundle:
+    """Validate exact member/path/size/hash coverage for accelerator outputs.
+
+    The manifest's execution class is producer-declared.  This CPU-side loader
+    verifies byte identity and member closure only; it deliberately does not
+    claim that accelerator inference was independently rerun here.
+    """
+
+    bundle_root = Path(root).resolve(strict=True)
+    manifest_path = _contained_file(bundle_root, manifest_relative, label="member manifest")
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("materialized member manifest must be an object")
+    if payload.get("schema_version") != 1 or payload.get("kind") != "controlled_members":
+        raise ValueError("materialized member manifest has an unsupported schema")
+    producer_execution_class = str(payload.get("producer_execution_class", ""))
+    if producer_execution_class != "accelerator":
+        raise ValueError("materialized members must declare the accelerator execution class")
+    if payload.get("configuration_sha256") != config_sha256:
+        raise ValueError("materialized member configuration fingerprint mismatch")
+    expected_contract = member_contract_sha256(members)
+    if payload.get("member_contract_sha256") != expected_contract:
+        raise ValueError("materialized member-plan fingerprint mismatch")
+    raw_records = payload.get("members")
+    if not isinstance(raw_records, list):
+        raise ValueError("materialized member manifest members must be a list")
+
+    expected = {member.member_id: member for member in members}
+    artifacts: dict[str, MaterializedMemberArtifact] = {}
+    registered_outputs: set[str] = set()
+    for raw_record in raw_records:
+        if not isinstance(raw_record, Mapping):
+            raise ValueError("materialized member record must be an object")
+        member_id = str(raw_record.get("member_id", ""))
+        if member_id not in expected or member_id in artifacts:
+            raise ValueError(f"unexpected or duplicate materialized member: {member_id!r}")
+        member = expected[member_id]
+        output = str(raw_record.get("output", ""))
+        if output != member.output or output in registered_outputs:
+            raise ValueError(f"materialized output path mismatch for {member_id}")
+        registered_outputs.add(output)
+        digest = str(raw_record.get("sha256", "")).lower()
+        if not SHA256_PATTERN.fullmatch(digest):
+            raise ValueError(f"materialized output has an invalid SHA256: {member_id}")
+        try:
+            size = int(raw_record.get("size"))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"materialized output has an invalid size: {member_id}") from error
+        if size < 1:
+            raise ValueError(f"materialized output is empty: {member_id}")
+        source = _contained_file(bundle_root, output, label=f"member {member_id}")
+        if source.stat().st_size != size or sha256_file(source) != digest:
+            raise ValueError(f"materialized output byte identity mismatch: {member_id}")
+        document = json.loads(source.read_text(encoding="utf-8"))
+        if not isinstance(document, Mapping):
+            raise ValueError(f"materialized output is not an object: {member_id}")
+        identity = (
+            document.get("schema_version") == 1
+            and document.get("member_id") == member_id
+            and document.get("phase") == member.phase
+            and document.get("status") == "completed"
+        )
+        if not identity:
+            raise ValueError(f"materialized output identity mismatch: {member_id}")
+        artifacts[member_id] = MaterializedMemberArtifact(
+            member_id=member_id,
+            output=output,
+            source=source,
+            size=size,
+            sha256=digest,
+        )
+    if set(artifacts) != set(expected):
+        missing = sorted(set(expected) - set(artifacts))
+        raise ValueError(f"materialized member coverage is incomplete: {missing[:5]}")
+    return MaterializedMemberBundle(
+        root=bundle_root,
+        manifest=manifest_path,
+        producer_execution_class=producer_execution_class,
+        artifacts=artifacts,
+    )
+
+
+def _atomic_copy_verified(source: Path, destination: Path, expected_sha256: str) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with source.open("rb") as input_stream, os.fdopen(descriptor, "wb") as output_stream:
+            shutil.copyfileobj(input_stream, output_stream)
+            output_stream.flush()
+            os.fsync(output_stream.fileno())
+        if sha256_file(temporary) != expected_sha256:
+            raise ValueError(f"materialized copy SHA256 mismatch: {destination}")
+        os.replace(temporary, destination)
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
+
+
+def materialized_member_executor(bundle: MaterializedMemberBundle) -> MemberExecutor:
+    """Create an executor that ingests prevalidated accelerator artifacts."""
+
+    def executor(context: RunContext, member: PlanMember) -> Sequence[Path]:
+        artifact = bundle.artifacts[member.member_id]
+        destination = context.path / member.output
+        return (_atomic_copy_verified(artifact.source, destination, artifact.sha256),)
+
+    return executor
 
 
 def _artifact_record(context: RunContext, artifact: Path) -> dict[str, Any]:
@@ -277,6 +522,15 @@ def execute_members(
     reused = 0
     for member in members:
         receipt_path = _member_receipt_path(context, member)
+        unresolved = [
+            dependency
+            for dependency in member.dependencies
+            if receipts.get(dependency, {}).get("status") != "completed"
+        ]
+        if unresolved:
+            raise RuntimeError(
+                f"member {member.member_id} has incomplete dependencies: {unresolved}"
+            )
         if context.resume and receipt_reusable(context, member):
             receipts[member.member_id] = load_member_receipt(receipt_path)
             completed += 1
@@ -326,12 +580,14 @@ def smoke_executor(context: RunContext, member: PlanMember) -> Sequence[Path]:
 
     output = context.path / member.output
     output.parent.mkdir(parents=True, exist_ok=True)
-    if member.phase == "c2_train":
+    if member.phase in {"c1_train", "c2_train"}:
         payload = {
             "schema_version": 1,
             "kind": "cpu_oracle_training_placeholder",
             "model_id": member.metadata["model_id"],
+            "family": member.metadata["family"],
             "seed": member.seed,
+            "checkpoint_outputs": member.metadata.get("checkpoint_outputs", []),
             "gpu_verification": "pending",
         }
     elif member.phase == "c2_evaluate":
@@ -381,12 +637,19 @@ def smoke_executor(context: RunContext, member: PlanMember) -> Sequence[Path]:
 
 
 __all__ = [
+    "MaterializedMemberArtifact",
+    "MaterializedMemberBundle",
     "MemberExecutor",
     "PlanMember",
     "build_members",
+    "configuration_sha256",
     "execute_members",
+    "materialized_member_executor",
+    "member_contract_sha256",
     "plan_counts",
     "receipt_reusable",
+    "resolve_materialized_output_root",
     "smoke_executor",
+    "validate_materialized_member_bundle",
     "write_jobs_manifest",
 ]

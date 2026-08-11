@@ -27,6 +27,7 @@ export DECAF_DATA_ROOT=/path/to/datasets
 export DECAF_CACHE_ROOT=/path/to/cache
 export DECAF_RESULTS_ROOT=/path/to/results
 export DECAF_REFERENCE_RUNS_ROOT=/path/to/reference-runs
+export DECAF_CONTROLLED_GPU_OUTPUT_ROOT=/path/to/controlled-accelerator-bundle
 ```
 
 Dataset and checkpoint placement is defined in
@@ -76,15 +77,39 @@ bash scripts/reproduce/attribution.sh --stage all --profile paper --output "$DEC
 bash scripts/reproduce/covertype.sh --stage all --profile paper --output "$DECAF_RESULTS_ROOT/covertype/paper" --resume
 ```
 
+Controlled paper compute is a deliberately explicit accelerator boundary. Its
+`prepare` stage verifies the Shapes3D bytes and all C0, C1, and C2 checkpoint
+manifests beneath `$DECAF_CACHE_ROOT/checkpoints/controlled`. Its `compute`
+stage does not launch GPU work on a CPU host. It ingests the bundle named by
+`$DECAF_CONTROLLED_GPU_OUTPUT_ROOT`, requiring exact configuration and member-plan
+fingerprints, 600 member artifacts with registered SHA-256 digests, and a
+14-file analysis manifest. The producer declares the accelerator execution
+class; this loader verifies byte identity without claiming an independent GPU
+rerun.
+
+The accelerator bundle contract is machine-readable. `manifests/members.json`
+uses `kind: controlled_members`, records the plan-emitted
+`configuration_sha256` and `member_contract_sha256`, declares
+`producer_execution_class: accelerator`, and contains one
+`member_id`/`output`/`size`/`sha256` record per planned member. Each referenced
+JSON output repeats its `member_id`, `phase`, `status: completed`, and
+`schema_version: 1`. `manifests/analysis.json` uses
+`kind: controlled_analysis` and the standard file-manifest schema for the exact
+`analysis/C0`, `analysis/C1`, and `analysis/C2` inputs consumed by the frozen
+schema adapters.
+
 Before allocating hardware, inspect the exact static plan without executing it:
 
 ```bash
 bash scripts/reproduce/verify.sh --mode full-plan
 ```
 
-The paper plans contain 30 controlled base models, 72 ImageNet-9 models, the
-three aligned attribution architectures plus optional large-model and boundary
-profiles, and 135 Covertype models. See `docs/hardware.md` before starting.
+The controlled paper plan contains 30 sealed C0 base models, 44 C1 factory jobs
+that produce 88 selected checkpoints, 316 C1 measurement jobs, and 30 C2
+training plus 30 C2 evaluation jobs (600 scheduled members total). The other
+paper plans contain 72 ImageNet-9 models, the three aligned attribution
+architectures plus optional large-model and boundary profiles, and 135
+Covertype models. See `docs/hardware.md` before starting.
 
 ## Paper rendering
 

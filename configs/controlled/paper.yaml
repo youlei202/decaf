@@ -6,7 +6,16 @@ max_workers: 32
 assets:
   dataset_root: '${DECAF_DATA_ROOT}/3d_shapes'
   c0_model_manifest: model_manifest.csv
+  c1_model_manifest: endpoint_behavior_model_manifest.csv
+  c2_model_manifest: context_swap_model_manifest.csv
   c0_no_retraining: true
+
+execution:
+  backend: materialized_accelerator_outputs
+  materialized_root_environment: DECAF_CONTROLLED_GPU_OUTPUT_ROOT
+  member_manifest: manifests/members.json
+  analysis_manifest: manifests/analysis.json
+  analysis_root: analysis
 
 base:
   tasks: [object_color, object_shape, wall_color, color_shape_xor, context_gate]
@@ -28,6 +37,7 @@ endpoint_behavior:
   fragility_variants: [fragile, neutral, robust]
   fragility_seeds: [5301, 5302, 5303]
   terminal_epoch: 20
+  expected_training_jobs: 44
   expected_counts: {E: 52, C: 18, F: 18}
   evidence_selection:
     resnet18:
@@ -87,11 +97,12 @@ expected_plan:
   causal_checkpoints: 18
   fragility_checkpoints: 18
   endpoint_behavior_checkpoints: 88
+  endpoint_behavior_training_jobs: 44
   endpoint_behavior_units_per_pass: 158
   endpoint_behavior_units_total: 316
   contradiction_models: 30
   contradiction_evaluation_units: 30
-  scheduled_members: 556
+  scheduled_members: 600
 
 headline_targets:
   figure_02_intended_abs: {expected: 0.05079873173186311, tolerance: 0.00000000000001}

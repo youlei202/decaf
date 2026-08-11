@@ -8,6 +8,9 @@ assets:
   c0_model_manifest: model_manifest.csv
   c0_no_retraining: true
 
+execution:
+  backend: cpu_score_oracle
+
 base:
   tasks: [object_shape]
   architectures: [resnet18]
@@ -26,6 +29,7 @@ endpoint_behavior:
   fragility_variants: [fragile]
   fragility_seeds: [5301]
   terminal_epoch: 1
+  expected_training_jobs: 3
   expected_counts: {E: 1, C: 1, F: 1}
   evidence_selection:
     resnet18:
@@ -67,10 +71,11 @@ expected_plan:
   causal_checkpoints: 1
   fragility_checkpoints: 1
   endpoint_behavior_checkpoints: 3
+  endpoint_behavior_training_jobs: 3
   endpoint_behavior_units_per_pass: 5
   endpoint_behavior_units_total: 5
   contradiction_models: 1
   contradiction_evaluation_units: 1
-  scheduled_members: 8
+  scheduled_members: 11
 
 headline_targets: {}

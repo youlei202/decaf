@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -13,7 +14,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from decaf.core.manifests import atomic_write_json
+from decaf.core.manifests import (
+    atomic_write_json,
+    read_json,
+    sha256_file,
+    verify_file_manifest,
+)
 from decaf.paper.analysis_replay import select_figure_02, select_figure_03, select_figure_04
 from decaf.paper.manifest import repository_root
 from decaf.paper.reference import (
@@ -260,12 +266,10 @@ REFERENCE_MEMBERS: Mapping[str, Mapping[str, str]] = {
         "c1_stages": "results/endpoint_behavior_v1_measurement/stage_summary.parquet",
         "c1_bootstrap": "results/endpoint_behavior_v1_measurement/per_sample_bootstrap.parquet",
         "c1_e_correlations": (
-            "results/endpoint_behavior_v1_measurement/tables/"
-            "T03_module_e_correlations.csv"
+            "results/endpoint_behavior_v1_measurement/tables/T03_module_e_correlations.csv"
         ),
         "c1_f_validation": (
-            "results/endpoint_behavior_v1_measurement/tables/"
-            "T05_module_f_validation.csv"
+            "results/endpoint_behavior_v1_measurement/tables/T05_module_f_validation.csv"
         ),
         "c1_geometry": "results/endpoint_behavior_v1_measurement/tables/T07_geometry_transfer.csv",
     },
@@ -277,6 +281,127 @@ REFERENCE_MEMBERS: Mapping[str, Mapping[str, str]] = {
         "c2_seeds": "tables/T06_seed_results.csv",
     },
 }
+
+
+def controlled_reference_paths(*, prefix: str = "") -> tuple[str, ...]:
+    """Return the exact analysis-input paths required by the Controlled adapter."""
+
+    root = Path(prefix) if prefix else Path()
+    return tuple(
+        sorted(
+            (root / run_id / relative).as_posix()
+            for run_id, members in REFERENCE_MEMBERS.items()
+            for relative in members.values()
+        )
+    )
+
+
+def controlled_reference_complete(root: str | Path) -> bool:
+    """Return whether every registered C0/C1/C2 analysis input is present."""
+
+    source = Path(root)
+    return all((source / relative).is_file() for relative in controlled_reference_paths())
+
+
+def reference_bundle_receipts(
+    root: str | Path,
+    *,
+    source_kind: str,
+) -> list[dict[str, Any]]:
+    """Fingerprint all local analysis inputs without exposing host paths."""
+
+    source = Path(root).resolve(strict=True)
+    receipts: list[dict[str, Any]] = []
+    for relative in controlled_reference_paths():
+        path = source / relative
+        if not path.is_file():
+            raise FileNotFoundError(f"controlled reference input is missing: {relative}")
+        receipts.append(
+            {
+                "path": relative,
+                "bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+                "source_kind": source_kind,
+            }
+        )
+    return receipts
+
+
+def _atomic_copy(source: Path, destination: Path, expected_sha256: str) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with source.open("rb") as input_stream, os.fdopen(descriptor, "wb") as output_stream:
+            shutil.copyfileobj(input_stream, output_stream)
+            output_stream.flush()
+            os.fsync(output_stream.fileno())
+        if sha256_file(temporary) != expected_sha256:
+            raise ValueError(f"materialized analysis copy SHA256 mismatch: {destination}")
+        os.replace(temporary, destination)
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        raise
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
+
+
+def materialize_controlled_analysis_outputs(
+    source_root: str | Path,
+    destination: str | Path,
+    *,
+    manifest_relative: str = "manifests/analysis.json",
+    analysis_prefix: str = "analysis",
+) -> list[dict[str, Any]]:
+    """Verify and ingest the analysis-ready portion of an accelerator bundle."""
+
+    root = Path(source_root).resolve(strict=True)
+    relative_manifest = Path(manifest_relative)
+    if relative_manifest.is_absolute():
+        raise ValueError("materialized analysis manifest path must be relative")
+    manifest_path = (root / relative_manifest).resolve(strict=True)
+    try:
+        manifest_path.relative_to(root)
+    except ValueError as error:
+        raise ValueError("materialized analysis manifest escapes its root") from error
+    manifest = read_json(manifest_path)
+    if not isinstance(manifest, Mapping):
+        raise ValueError("materialized analysis manifest must be an object")
+    if manifest.get("schema_version") != 1 or manifest.get("kind") != "controlled_analysis":
+        raise ValueError("materialized analysis manifest has an unsupported schema")
+    files = manifest.get("files")
+    if not isinstance(files, list):
+        raise ValueError("materialized analysis manifest files must be a list")
+    actual_paths = {str(record.get("path", "")) for record in files if isinstance(record, Mapping)}
+    expected_paths = set(controlled_reference_paths(prefix=analysis_prefix))
+    if actual_paths != expected_paths or len(files) != len(expected_paths):
+        raise ValueError("materialized analysis manifest has incomplete or extra file coverage")
+    verify_file_manifest(manifest, root=root, raise_on_error=True)
+
+    output = Path(destination).resolve()
+    receipts: list[dict[str, Any]] = []
+    records = {str(record["path"]): record for record in files}
+    for registered_path in sorted(expected_paths):
+        record = records[registered_path]
+        relative = Path(registered_path).relative_to(analysis_prefix)
+        source = (root / registered_path).resolve(strict=True)
+        target = output / relative
+        _atomic_copy(source, target, str(record["sha256"]))
+        receipts.append(
+            {
+                "path": relative.as_posix(),
+                "bytes": int(record["size"]),
+                "sha256": str(record["sha256"]),
+                "source_kind": "materialized_accelerator_analysis",
+            }
+        )
+    return receipts
 
 
 def _read_frame(path: Path) -> pd.DataFrame:
@@ -545,8 +670,12 @@ __all__ = [
     "analyze_reference_bundle",
     "analyze_smoke",
     "assert_headline_targets",
+    "controlled_reference_complete",
+    "controlled_reference_paths",
     "load_reference_bundle",
+    "materialize_controlled_analysis_outputs",
     "materialize_controlled_references",
+    "reference_bundle_receipts",
     "summarize_headlines",
     "validate_frame",
 ]

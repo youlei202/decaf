@@ -19,11 +19,12 @@ def test_paper_plan_locks_every_registered_controlled_count() -> None:
         "causal_checkpoints": 18,
         "fragility_checkpoints": 18,
         "endpoint_behavior_checkpoints": 88,
+        "endpoint_behavior_training_jobs": 44,
         "endpoint_behavior_units_per_pass": 158,
         "endpoint_behavior_units_total": 316,
         "contradiction_models": 30,
         "contradiction_evaluation_units": 30,
-        "scheduled_members": 556,
+        "scheduled_members": 600,
     }
     assert all(assertion["passed"] for assertion in plan["assertions"].values())
     assert plan["contracts"]["c0_no_retraining"] is True
@@ -41,6 +42,13 @@ def test_plan_paths_receipts_and_dependencies_are_unique() -> None:
     known = set(identifiers)
     assert all(set(member["dependencies"]) <= known for member in members)
     assert not any(member["phase"].startswith("c0_train") for member in members)
+    c1_training = {member["member_id"] for member in members if member["phase"] == "c1_train"}
+    assert len(c1_training) == 44
+    assert all(
+        len(member["dependencies"]) == 1 and member["dependencies"][0] in c1_training
+        for member in members
+        if member["phase"] == "c1_measure"
+    )
 
 
 def test_c1_exact_checkpoint_selection_and_factory_jobs() -> None:
@@ -58,5 +66,6 @@ def test_c1_exact_checkpoint_selection_and_factory_jobs() -> None:
 
 def test_smoke_plan_is_small_but_uses_the_same_schema() -> None:
     plan = build_plan(load_profile("controlled", "smoke"))
-    assert plan["scientific_counts"]["scheduled_members"] == 8
+    assert plan["scientific_counts"]["scheduled_members"] == 11
     assert plan["scientific_counts"]["endpoint_behavior_checkpoints"] == 3
+    assert plan["scientific_counts"]["endpoint_behavior_training_jobs"] == 3

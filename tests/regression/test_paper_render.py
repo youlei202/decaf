@@ -3,9 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from decaf.paper.render import render_all
+from decaf.paper.render import build_parser, render_all
 
 REPOSITORY = Path(__file__).resolve().parents[2]
+
+
+def test_public_paper_wrapper_argument_aliases() -> None:
+    arguments = build_parser().parse_args(
+        ["--reference-runs", "one:two", "--output", "paper/generated"]
+    )
+
+    assert arguments.reference_roots == ["one:two"]
+    assert arguments.generated_root == "paper/generated"
+    assert arguments.replay_root is None
 
 
 def test_render_all_generates_twenty_eight_self_contained_tex_assets(tmp_path: Path) -> None:

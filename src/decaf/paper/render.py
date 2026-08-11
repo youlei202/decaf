@@ -5,9 +5,13 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 from collections.abc import Mapping, Sequence
+from io import StringIO
 from pathlib import Path
 from typing import Any
+
+from decaf.experiments.common import atomic_text
 
 from .analysis_replay import replay_paper_data
 from .manifest import VisualAsset, import_generator, load_visual_manifest, repository_root
@@ -148,8 +152,7 @@ def render_all(
             destination = output / subdirectory / Path(asset.tex_target).name
         else:
             destination = output / asset.tex_target
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(content, encoding="utf-8")
+        atomic_text(destination, content)
         paths.append(destination)
         artifact_rows.append(
             {
@@ -179,21 +182,31 @@ def render_all(
         "generated_bytes",
         "comparison_status",
     ]
-    with (verification / "paper_artifact_diff.csv").open(
-        "w", encoding="utf-8", newline=""
-    ) as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
-        writer.writeheader()
-        writer.writerows(artifact_rows)
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=columns, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(artifact_rows)
+    atomic_text(verification / "paper_artifact_diff.csv", buffer.getvalue())
     return paths
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference-root", action="append", help="Recursive archive search root")
-    parser.add_argument("--replay-root", required=True, help="Replay output directory")
+    parser.add_argument(
+        "--reference-root",
+        "--reference-runs",
+        action="append",
+        dest="reference_roots",
+        help="Archive file or search root; path-separated lists are accepted",
+    )
+    parser.add_argument("--replay-root", help="Replay output directory")
     parser.add_argument("--repo-root", help="Repository root containing paper manifests")
-    parser.add_argument("--generated-root", help="Alternative root for generated TeX snippets")
+    parser.add_argument(
+        "--generated-root",
+        "--output",
+        dest="generated_root",
+        help="Alternative root for generated TeX snippets",
+    )
     parser.add_argument(
         "--render-only", action="store_true", help="Reuse an existing replay receipt"
     )
@@ -206,12 +219,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.render_only and args.materialize_only:
         raise SystemExit("--render-only and --materialize-only are mutually exclusive")
     repo = Path(args.repo_root).resolve() if args.repo_root else repository_root()
+    replay_root = (
+        Path(args.replay_root).resolve()
+        if args.replay_root
+        else repo / "verification" / "paper-replay"
+    )
+    roots = [
+        item for raw in (args.reference_roots or ()) for item in str(raw).split(os.pathsep) if item
+    ]
     if not args.render_only:
-        roots: Any = args.reference_root if args.reference_root else None
-        replay_paper_data(args.replay_root, reference_root=roots, repo_root=repo)
+        reference_roots: Any = roots or None
+        replay_paper_data(replay_root, reference_root=reference_roots, repo_root=repo)
     if not args.materialize_only:
         render_all(
-            args.replay_root,
+            replay_root,
             repo_root=repo,
             generated_root=args.generated_root,
         )

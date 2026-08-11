@@ -13,7 +13,7 @@ from decaf.experiments.covertype.paper import paper
 def main(argv: Sequence[str] | None = None) -> int:
     """Run prepare, compute, analyze, paper, all, or a static plan audit."""
 
-    parser = make_parser("covertype")
+    parser = make_parser("covertype", profiles=("smoke", "integration", "paper"))
     arguments = parser.parse_args(argv)
     return run_cli(
         experiment="covertype",

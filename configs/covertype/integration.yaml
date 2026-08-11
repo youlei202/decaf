@@ -1,0 +1,55 @@
+experiment: covertype
+schema_version: 1
+description: >-
+  Required CPU integration on a deterministic, balanced shard of the pinned
+  real sklearn Covertype cache. Missing or mismatched cache bytes fail closed;
+  this profile never uses the synthetic smoke fixture.
+max_workers: 2
+
+data:
+  source: sklearn_covtype_cache
+  download_if_missing: false
+  allow_fixture_fallback: false
+  split_seed: 7601
+  cache:
+    root_env: DECAF_DATA_ROOT
+    archive: covertype_balanced_240000_split7601.npz
+    manifest: covertype_balanced_240000_split7601.manifest.json
+    archive_sha256: "681f893d49757e4d588115430b072980df2f4c281acedb1183b53ef5b4e443de"
+    manifest_sha256: "ce6790aed36ce39051c2bbcb2672689a51cf3a504a893b6122a9d7ffa4a219ed"
+    logical_fingerprint: "07aa4349a338b765e0c143407ecc0acd4ccdf35ed0e13c8014519fdc013ade9c"
+    fixed_shard_fingerprint: "7c323c72610e2b06d89d7d37a30fb6e6a8552d145cb1d94b39a687c0fafbd795"
+    fixed_shard_rows:
+      train: 1200
+      validation: 400
+      test: 400
+
+protocol:
+  model_families: [hist_gradient_boosting]
+  seeds: [7701]
+  module_c:
+    strengths: [0.95]
+    mechanisms: [direct]
+  module_f:
+    regimes: [fragile]
+
+decaf:
+  stages: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  epsilon: 0.02
+  legal_binary_queries_only: true
+
+behavior:
+  direction_delta: 0.02
+
+evaluation:
+  max_rows: 400
+
+analysis:
+  bootstrap_repetitions: 100
+  bootstrap_seed: 7601
+
+models:
+  hist_gradient_boosting:
+    max_iter: 60
+    learning_rate: 0.08
+    max_leaf_nodes: 31

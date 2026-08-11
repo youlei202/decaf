@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from decaf.experiments.covertype.analyze import canonical_fragility_correlation
+from decaf.experiments.covertype.data import prepare_dataset
 from decaf.experiments.covertype.evaluate import (
     FORMAL_MODEL_FAMILIES,
     FORMAL_SEEDS,
@@ -108,3 +111,48 @@ def test_canonical_analysis_names_and_correlates_endpoint_null_outcome() -> None
     assert result["component"] == "F"
     assert result["outcome"] == "null_context_prediction_change_rate"
     assert result["spearman"] == pytest.approx(1.0)
+
+
+def _real_cache_config(*, allow_fixture_fallback: bool = False) -> dict[str, object]:
+    return {
+        "data": {
+            "source": "sklearn_covtype_cache",
+            "allow_fixture_fallback": allow_fixture_fallback,
+            "cache": {
+                "root_env": "DECAF_DATA_ROOT",
+                "archive": "covertype.npz",
+                "manifest": "covertype.manifest.json",
+                "archive_sha256": "0" * 64,
+                "manifest_sha256": "0" * 64,
+                "logical_fingerprint": "0" * 64,
+                "fixed_shard_fingerprint": "0" * 64,
+                "fixed_shard_rows": {"train": 4, "validation": 4, "test": 4},
+            },
+        }
+    }
+
+
+def test_real_cache_mode_requires_explicit_data_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DECAF_DATA_ROOT", raising=False)
+    with pytest.raises(FileNotFoundError, match="DECAF_DATA_ROOT.*synthetic fallback is disabled"):
+        prepare_dataset(tmp_path / "run", _real_cache_config())
+
+
+def test_real_cache_mode_rejects_fixture_fallback_even_when_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DECAF_DATA_ROOT", str(tmp_path))
+    with pytest.raises(ValueError, match="forbids synthetic fixture fallback"):
+        prepare_dataset(tmp_path / "run", _real_cache_config(allow_fixture_fallback=True))
+
+
+def test_real_cache_mode_rejects_changed_archive_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DECAF_DATA_ROOT", str(tmp_path))
+    (tmp_path / "covertype.npz").write_bytes(b"not the pinned cache")
+    (tmp_path / "covertype.manifest.json").write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="cache SHA-256 mismatch"):
+        prepare_dataset(tmp_path / "run", _real_cache_config())

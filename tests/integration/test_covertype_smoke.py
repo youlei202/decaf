@@ -1,18 +1,29 @@
-"""Real CPU end-to-end integration for the Covertype experiment family."""
+"""Pinned-real-data CPU integration for the Covertype experiment family."""
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
 
 from decaf.experiments.covertype.cli import main
 
+EXPECTED_ARCHIVE_SHA256 = "681f893d49757e4d588115430b072980df2f4c281acedb1183b53ef5b4e443de"
 
-def test_covertype_smoke_trains_evaluates_analyzes_and_resumes(tmp_path: Path) -> None:
-    output = tmp_path / "covertype-smoke"
-    assert main(["--stage", "all", "--profile", "smoke", "--output", str(output)]) == 0
+
+def test_covertype_real_shard_trains_evaluates_analyzes_and_resumes(tmp_path: Path) -> None:
+    data_root = os.environ.get("DECAF_DATA_ROOT")
+    assert data_root, (
+        "DECAF_DATA_ROOT must point to the pinned real Covertype cache directory; "
+        "integration-cpu intentionally fails instead of using synthetic data"
+    )
+    archive = Path(data_root) / "covertype_balanced_240000_split7601.npz"
+    assert archive.is_file(), f"pinned real Covertype cache is missing: {archive}"
+
+    output = tmp_path / "covertype-real-integration"
+    assert main(["--stage", "all", "--profile", "integration", "--output", str(output)]) == 0
 
     run = json.loads((output / "run.json").read_text(encoding="utf-8"))
     data = json.loads((output / "manifests" / "data.json").read_text(encoding="utf-8"))
@@ -28,14 +39,22 @@ def test_covertype_smoke_trains_evaluates_analyzes_and_resumes(tmp_path: Path) -
     member_paths = sorted((output / "raw" / "members").glob("*.json"))
 
     assert run["status"] == "completed"
-    assert data["source_kind"] == "deterministic_synthetic_covtype_fixture"
-    assert data["fixture_is_smoke_only"]
-    assert len(member_paths) == 4
+    assert data["source_kind"] == "sklearn.datasets.fetch_covtype"
+    assert data["fallback_reason"] is None
+    assert not data["fixture_is_smoke_only"]
+    assert data["rows"] == {"train": 1200, "validation": 400, "test": 400}
+    assert data["source_archive"]["archive_sha256"] == EXPECTED_ARCHIVE_SHA256
+    assert data["source_archive"]["transport"] == "pinned_npz_cache"
+    assert data["source_archive"]["root_environment_variable"] == "DECAF_DATA_ROOT"
+    assert data["source_archive"]["fixed_shard"]["selection"] == (
+        "lowest_source_indices_per_class_within_frozen_split"
+    )
+    assert len(member_paths) == 2
     assert compute_receipt["status"] == "completed"
     assert compute_receipt["all_processes_exited"]
     assert analysis["all_decaf_identities_passed"]
-    assert analysis["module_c_models"] == 2
-    assert analysis["module_f_models"] == 2
+    assert analysis["module_c_models"] == 1
+    assert analysis["module_f_models"] == 1
     assert analysis["canonical_fragility_correlation"]["expression"] == (
         "correlation(F, null_context_prediction_change_rate)"
     )
@@ -44,7 +63,11 @@ def test_covertype_smoke_trains_evaluates_analyzes_and_resumes(tmp_path: Path) -
         assert list((output / "paper_data" / "tables").glob(f"table_{table_number}_*.csv"))
 
     frame = pd.read_csv(output / "metrics" / "model_results.csv")
-    assert len(frame) == 4
+    assert len(frame) == 2
+    assert set(frame["model_family"]) == {"hist_gradient_boosting"}
+    assert set(frame["seed"]) == {7701}
+    assert set(frame.loc[frame["module"] == "C", "regime"]) == {"direct"}
+    assert set(frame.loc[frame["module"] == "F", "regime"]) == {"fragile"}
     assert frame["decaf_identity_passed"].all()
     assert frame["baseline_permutation_factor_importance"].notna().all()
     assert set(frame["model_implementation"]) == {
@@ -59,7 +82,7 @@ def test_covertype_smoke_trains_evaluates_analyzes_and_resumes(tmp_path: Path) -
                 "--stage",
                 "compute",
                 "--profile",
-                "smoke",
+                "integration",
                 "--output",
                 str(output),
                 "--resume",
@@ -71,7 +94,7 @@ def test_covertype_smoke_trains_evaluates_analyzes_and_resumes(tmp_path: Path) -
         (output / "receipts" / "compute_members.json").read_text(encoding="utf-8")
     )
     assert resumed_compute["status"] == "completed"
-    assert resumed_compute["details"]["resumed_members"] == 4
+    assert resumed_compute["details"]["resumed_members"] == 2
     assert before == {path.name: path.stat().st_mtime_ns for path in member_paths}
 
     assert (
@@ -80,7 +103,7 @@ def test_covertype_smoke_trains_evaluates_analyzes_and_resumes(tmp_path: Path) -
                 "--stage",
                 "all",
                 "--profile",
-                "smoke",
+                "integration",
                 "--output",
                 str(output),
                 "--resume",

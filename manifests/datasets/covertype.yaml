@@ -30,5 +30,18 @@ fingerprints:
     sha256: 07aa4349a338b765e0c143407ecc0acd4ccdf35ed0e13c8014519fdc013ade9c
     verification: verified
     provenance: frozen_public_reference_manifest
+  - id: integration_cache_archive
+    scope: local_transport_artifact
+    relative_path: covertype_balanced_240000_split7601.npz
+    sha256: 681f893d49757e4d588115430b072980df2f4c281acedb1183b53ef5b4e443de
+    verification: verified
+    provenance: frozen_public_reference_manifest
+  - id: integration_cache_manifest
+    scope: local_transport_manifest
+    relative_path: covertype_balanced_240000_split7601.manifest.json
+    sha256: ce6790aed36ce39051c2bbcb2672689a51cf3a504a893b6122a9d7ffa4a219ed
+    verification: verified
+    provenance: frozen_public_reference_manifest
 notes:
   - Continuous features use training-only population statistics with zero degrees of freedom.
+  - The CPU integration resolves both transport files directly beneath DECAF_DATA_ROOT.

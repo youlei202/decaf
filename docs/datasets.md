@@ -73,6 +73,17 @@ statistics with population variance; the remaining 44 binary features are
 preserved. The logical split fingerprint is
 `07aa4349a338b765e0c143407ecc0acd4ccdf35ed0e13c8014519fdc013ade9c`.
 
+The required CPU integration uses the pinned transport archive
+`$DECAF_DATA_ROOT/covertype_balanced_240000_split7601.npz` and its adjacent
+`.manifest.json`. The archive SHA-256 is
+`681f893d49757e4d588115430b072980df2f4c281acedb1183b53ef5b4e443de`; the
+manifest SHA-256 is
+`ce6790aed36ce39051c2bbcb2672689a51cf3a504a893b6122a9d7ffa4a219ed`. Neither
+file is redistributed. The integration profile selects fixed balanced rows from
+each already-frozen split and records both source digests plus the selected-shard
+fingerprint in its data manifest. Missing or changed bytes stop the run; this path
+never falls back to the synthetic smoke fixture.
+
 ## Fingerprint policy
 
 `verified` in a YAML entry means the fingerprint came from a frozen public

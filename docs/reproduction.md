@@ -65,6 +65,28 @@ bash scripts/reproduce/covertype.sh --stage all --profile smoke --output "$DECAF
 Smoke outputs prove that the local stack works. They are not substitutes for
 paper-profile estimates and must not be compared to headline tolerances.
 
+## Real Covertype CPU integration
+
+The release gate is separate from the synthetic Covertype smoke profile. Place
+the pinned real archive and companion manifest documented in `docs/datasets.md`
+directly under `$DECAF_DATA_ROOT`, then run:
+
+```bash
+bash scripts/reproduce/verify.sh --mode integration-cpu
+```
+
+For a family-local run of the same fixed shard, use:
+
+```bash
+bash scripts/reproduce/covertype.sh --stage all --profile integration \
+  --output "$DECAF_RESULTS_ROOT/covertype/integration"
+```
+
+This profile performs no download and permits no fixture fallback. It checks the
+archive, source manifest, logical split, and selected-shard fingerprints before
+training. Its data receipt intentionally records root-relative names and digests,
+not the operator's private absolute data path.
+
 ## Full paper execution
 
 The paper profile expands the sealed plan. Covertype executes locally, while the
@@ -211,7 +233,8 @@ repository's contract.
 
 Family wrappers accept
 `--stage prepare|compute|analyze|paper|all`,
-`--profile smoke|paper`, `--output`, `--resume`, and `--plan-only`.
+`--profile smoke|paper`, `--output`, `--resume`, and `--plan-only`. Covertype also
+accepts the release-only `integration` profile described above.
 The family-local `paper` stage prepares results for the global renderer; it
 does not compile a manuscript. Resume is receipt-driven: a member is reused only
 when its terminal receipt and declared artifact hashes validate. See

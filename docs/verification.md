@@ -21,20 +21,38 @@ Run an individual lane by replacing `all-cpu` with its mode name. Analysis
 replay requires `$DECAF_REFERENCE_RUNS_ROOT`; integration requires the
 dataset roots described in `manifests/datasets/`.
 
+The CPU integration lane specifically requires the pinned real Covertype cache:
+
+```bash
+export DECAF_DATA_ROOT=/path/to/covertype-cache
+bash scripts/reproduce/verify.sh --mode integration-cpu
+```
+
+That directory must directly contain
+`covertype_balanced_240000_split7601.npz` and its adjacent
+`covertype_balanced_240000_split7601.manifest.json`. The lane verifies both byte
+digests and the logical split fingerprint, then runs a fixed 1,200/400/400-row
+train/validation/test shard with one model family, one seed, one direction
+regime, one fragility regime, DECAF, a permutation baseline, analysis,
+paper-data generation, and receipt-based resume. An unset root, missing cache,
+or digest mismatch is a failure; synthetic substitution is forbidden.
+
 ## What is checked
 
 1. Reference archives and selected assets are matched by SHA-256 before use.
-2. Run receipts are terminal and each declared artifact exists with its recorded
+2. Real-shard input receipts bind the cache archive, companion manifest, logical
+   split, deterministic shard selection, and selected-shard fingerprint.
+3. Run receipts are terminal and each declared artifact exists with its recorded
    byte count and digest.
-3. Analysis replay reproduces canonical tables and paper panel data from frozen
+4. Analysis replay reproduces canonical tables and paper panel data from frozen
    raw results.
-4. Headline assertions compare named metrics against frozen targets with
+5. Headline assertions compare named metrics against frozen targets with
    assertion-specific absolute or relative tolerances. A rounded value shown in
    a paper is never used as the tolerance source.
-5. Paper rendering is rerun from the validated analysis outputs.
-6. The full-plan audit checks expected member cardinalities and dependencies
+6. Paper rendering is rerun from the validated analysis outputs.
+7. The full-plan audit checks expected member cardinalities and dependencies
    without scheduling GPU work.
-7. The repository audit rejects private absolute paths, non-public run
+8. The repository audit rejects private absolute paths, non-public run
    references, and non-English prose in public files.
 
 Expected static paper-plan counts include:

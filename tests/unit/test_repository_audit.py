@@ -41,17 +41,18 @@ def test_audit_scans_tracked_files_inside_generated_directories(
     tmp_path: Path,
 ) -> None:
     subprocess.run(("git", "init", "-q", str(tmp_path)), check=True)
-    generated = tmp_path / "verification" / ("RUN" + "_private.md")
+    generated = tmp_path / "verification" / ("RUN" + "_private.json")
     generated.parent.mkdir()
     private_root = "/" + "work" + "/" + "Users" + "/" + "leiyo"
-    generated.write_text(private_root + "\n", encoding="utf-8")
+    generated.write_text('{"note": "\u5f00\u59cb ' + private_root + '"}\n', encoding="utf-8")
     subprocess.run(
-        ("git", "-C", str(tmp_path), "add", "-f", "verification/RUN_private.md"),
+        ("git", "-C", str(tmp_path), "add", "-f", "verification/RUN_private.json"),
         check=True,
     )
 
     report = audit_repository(tmp_path)
 
     findings = {(finding["rule"], finding["path"]) for finding in report["findings"]}
-    assert ("development_prompt", "verification/RUN_private.md") in findings
-    assert ("private_path", "verification/RUN_private.md") in findings
+    assert ("development_prompt", "verification/RUN_private.json") in findings
+    assert ("english_only", "verification/RUN_private.json") in findings
+    assert ("private_path", "verification/RUN_private.json") in findings

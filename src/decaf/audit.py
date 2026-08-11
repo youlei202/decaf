@@ -9,7 +9,23 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-TEXT_SUFFIXES = {".md", ".py", ".rst", ".sh", ".toml", ".txt", ".yaml", ".yml"}
+TEXT_SUFFIXES = {
+    ".cfg",
+    ".csv",
+    ".ini",
+    ".json",
+    ".jsonl",
+    ".md",
+    ".py",
+    ".rst",
+    ".sh",
+    ".tex",
+    ".toml",
+    ".tsv",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
 SKIP_DIRECTORIES = {
     ".git",
     ".pytest_cache",

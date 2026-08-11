@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from decaf.experiments.covertype.cli import main
 
@@ -50,6 +51,17 @@ def test_covertype_real_shard_trains_evaluates_analyzes_and_resumes(tmp_path: Pa
         "lowest_source_indices_per_class_within_frozen_split"
     )
     assert len(member_paths) == 2
+    member_receipts = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted((output / "receipts" / "members").glob("*.json"))
+    ]
+    assert len(member_receipts) == 2
+    for receipt in member_receipts:
+        details = receipt["details"]
+        assert len(details["artifact_sha256"]) == 64
+        assert details["artifact_size_bytes"] > 0
+        assert details["dataset_fingerprint"] == data["fingerprint"]
+        assert details["record_identity"]["model_id"] == receipt["member_id"]
     assert compute_receipt["status"] == "completed"
     assert compute_receipt["all_processes_exited"]
     assert analysis["all_decaf_identities_passed"]
@@ -113,3 +125,19 @@ def test_covertype_real_shard_trains_evaluates_analyzes_and_resumes(tmp_path: Pa
     )
     after = {path.name: path.stat().st_mtime_ns for path in member_paths}
     assert before == after
+
+    victim = member_paths[0]
+    victim.write_text(victim.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    (output / "receipts" / "compute.json").unlink()
+    with pytest.raises(RuntimeError, match="artifact (size|hash) mismatch"):
+        main(
+            [
+                "--stage",
+                "compute",
+                "--profile",
+                "integration",
+                "--output",
+                str(output),
+                "--resume",
+            ]
+        )

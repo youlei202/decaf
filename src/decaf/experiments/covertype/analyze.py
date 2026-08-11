@@ -98,6 +98,14 @@ def _bootstrap_rank(
 def analyze(context: RunContext) -> dict[str, Any]:
     """Generate normalized model tables, rank statistics, and confidence intervals."""
 
+    member_root = context.path / "raw" / "members"
+    if not any(member_root.glob("*.json")):
+        if context.profile != "paper":
+            raise FileNotFoundError("no Covertype member artifacts are available")
+        from decaf.experiments.covertype.reference import analyze_sealed_reference
+
+        return analyze_sealed_reference(context)
+
     frame = load_member_frame(context.path)
     module_c = frame.loc[frame["module"].eq("C")].copy()
     module_f = frame.loc[frame["module"].eq("F")].copy()
@@ -170,6 +178,8 @@ def analyze(context: RunContext) -> dict[str, Any]:
     fragility = canonical_fragility_correlation(module_f)
     summary = {
         "schema_version": 1,
+        "source_mode": "computed_run",
+        "reference_input_count": 0,
         "model_count": len(frame),
         "module_c_models": len(module_c),
         "module_f_models": len(module_f),

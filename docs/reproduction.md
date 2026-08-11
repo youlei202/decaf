@@ -47,8 +47,12 @@ bash scripts/reproduce/covertype.sh --stage analyze --profile paper --output "$D
 
 Replay expects the matching frozen run beneath
 `$DECAF_REFERENCE_RUNS_ROOT`. It verifies the reference manifest before
-analysis. Endpoint M is part of the ordinary attribution analysis path; it is
-not a separate reproduction mode.
+analysis. The Covertype command discovers the sealed T0 archive, verifies its
+archive identity, materializes exactly the 13 registered analysis inputs, and
+binds each run-local input to its archive-member SHA-256. On `--resume`, both
+the archive and all materialized bytes are revalidated before analysis or paper
+outputs are trusted. Endpoint M is part of the ordinary attribution analysis
+path; it is not a separate reproduction mode.
 
 ## Smoke execution
 

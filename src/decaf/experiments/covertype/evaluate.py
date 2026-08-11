@@ -44,6 +44,7 @@ from decaf.experiments.covertype.models import (
     implementation_name,
     predict_positive,
 )
+from decaf.paper.reference import sha256_file
 
 FORMAL_MODEL_FAMILIES = MODEL_FAMILIES
 FORMAL_SEEDS = (7701, 7702, 7703)
@@ -189,16 +190,11 @@ def configured_specs(config: dict[str, Any]) -> tuple[ModelSpec, ...]:
     )
 
 
-def prepare(context: RunContext) -> dict[str, Any]:
-    """Prepare data plus current and formal job manifests."""
+def _jobs_text(specs: tuple[ModelSpec, ...]) -> str:
+    return "".join(json.dumps(spec.record(), sort_keys=True) + "\n" for spec in specs)
 
-    manifest = prepare_dataset(context.path, context.config)
-    current = configured_specs(context.config)
-    atomic_json(context.path / "manifests" / "formal_plan.json", build_formal_plan())
-    atomic_text(
-        context.path / "manifests" / "jobs.jsonl",
-        "".join(json.dumps(spec.record(), sort_keys=True) + "\n" for spec in current),
-    )
+
+def _model_plan_text(specs: tuple[ModelSpec, ...]) -> str:
     header = "model_id,module,regime,strength,model_family,seed\n"
     rows = [
         ",".join(
@@ -211,13 +207,110 @@ def prepare(context: RunContext) -> dict[str, Any]:
                 str(spec.seed),
             )
         )
-        for spec in current
+        for spec in specs
     ]
-    atomic_text(context.path / "manifests" / "model_plan.csv", header + "\n".join(rows) + "\n")
+    return header + "\n".join(rows) + "\n"
+
+
+def prepare(context: RunContext) -> dict[str, Any]:
+    """Prepare data plus current and formal job manifests."""
+
+    manifest = prepare_dataset(context.path, context.config)
+    current = configured_specs(context.config)
+    atomic_json(context.path / "manifests" / "formal_plan.json", build_formal_plan())
+    atomic_text(
+        context.path / "manifests" / "jobs.jsonl",
+        _jobs_text(current),
+    )
+    atomic_text(context.path / "manifests" / "model_plan.csv", _model_plan_text(current))
     return {
         "source_kind": manifest["source_kind"],
         "configured_models": len(current),
         "formal_models": 135,
+    }
+
+
+def _json_object(path: Path, *, label: str) -> dict[str, Any]:
+    if not path.is_file():
+        raise FileNotFoundError(f"{label} is missing: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{label} is not valid JSON: {path}") from error
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must be a JSON object: {path}")
+    return payload
+
+
+def validate_prepare_resume(context: RunContext) -> dict[str, Any]:
+    """Validate every prepared artifact against its manifest and current config."""
+
+    manifest = _json_object(
+        context.path / "manifests" / "data.json", label="Covertype data manifest"
+    )
+    artifact = manifest.get("artifact")
+    if not isinstance(artifact, dict) or artifact.get("relative_path") != "raw/covertype_data.npz":
+        raise ValueError("Covertype data manifest artifact binding differs")
+    data_path = context.path / "raw" / "covertype_data.npz"
+    if not data_path.is_file():
+        raise FileNotFoundError("prepared Covertype data artifact is missing")
+    if data_path.stat().st_size != int(artifact.get("size_bytes", -1)):
+        raise ValueError("prepared Covertype data artifact size mismatch")
+    if sha256_file(data_path) != artifact.get("sha256"):
+        raise ValueError("prepared Covertype data artifact hash mismatch")
+    dataset = load_dataset(context.path)
+    if dataset.fingerprint != manifest.get("fingerprint"):
+        raise ValueError("prepared Covertype data fingerprint mismatch")
+    if dataset.source_kind != manifest.get("source_kind"):
+        raise ValueError("prepared Covertype data source identity mismatch")
+    observed_rows = {
+        "train": len(dataset.train.y),
+        "validation": len(dataset.validation.y),
+        "test": len(dataset.test.y),
+    }
+    if manifest.get("rows") != observed_rows:
+        raise ValueError("prepared Covertype split row counts differ")
+    expected_source = str(context.config["data"].get("source", "sklearn_covtype"))
+    if expected_source == "sklearn_covtype_cache":
+        source = manifest.get("source_archive")
+        cache = context.config["data"].get("cache")
+        if not isinstance(source, dict) or not isinstance(cache, dict):
+            raise ValueError("prepared real Covertype source receipt is missing")
+        expected_source_fields = {
+            "archive_relative_path": str(cache["archive"]),
+            "archive_sha256": str(cache["archive_sha256"]),
+            "manifest_relative_path": str(cache["manifest"]),
+            "manifest_sha256": str(cache["manifest_sha256"]),
+            "logical_fingerprint": str(cache["logical_fingerprint"]),
+        }
+        for field, expected in expected_source_fields.items():
+            if source.get(field) != expected:
+                raise ValueError(f"prepared real Covertype source {field} differs")
+        fixed_shard = source.get("fixed_shard")
+        if not isinstance(fixed_shard, dict) or fixed_shard.get("fingerprint") != cache.get(
+            "fixed_shard_fingerprint"
+        ):
+            raise ValueError("prepared real Covertype fixed-shard fingerprint differs")
+
+    specs = configured_specs(context.config)
+    formal_plan = _json_object(
+        context.path / "manifests" / "formal_plan.json",
+        label="Covertype formal plan",
+    )
+    if formal_plan != build_formal_plan():
+        raise ValueError("prepared Covertype formal plan differs from the registered plan")
+    jobs_path = context.path / "manifests" / "jobs.jsonl"
+    if not jobs_path.is_file() or jobs_path.read_text(encoding="utf-8") != _jobs_text(specs):
+        raise ValueError("prepared Covertype job manifest differs from the current config")
+    model_plan_path = context.path / "manifests" / "model_plan.csv"
+    if not model_plan_path.is_file() or model_plan_path.read_text(
+        encoding="utf-8"
+    ) != _model_plan_text(specs):
+        raise ValueError("prepared Covertype model plan differs from the current config")
+    return {
+        "configured_models": len(specs),
+        "dataset_fingerprint": dataset.fingerprint,
+        "data_artifact_sha256": artifact["sha256"],
     }
 
 
@@ -390,16 +483,67 @@ def _member_paths(run_path: Path, model_id: str) -> tuple[Path, Path]:
     )
 
 
+def _validate_completed_member(
+    run_path: Path,
+    spec: ModelSpec,
+    *,
+    dataset_fingerprint: str,
+) -> dict[str, Any]:
+    artifact_path, receipt_path = _member_paths(run_path, spec.model_id)
+    receipt = load_member_receipt(receipt_path)
+    if receipt.get("member_id") != spec.model_id or receipt.get("status") != "completed":
+        raise ValueError(f"completed Covertype member receipt identity differs: {spec.model_id}")
+    details = receipt.get("details")
+    if not isinstance(details, dict):
+        raise ValueError(f"completed Covertype member receipt details are missing: {spec.model_id}")
+    expected_relative = f"raw/members/{spec.model_id}.json"
+    if details.get("artifact") != expected_relative:
+        raise ValueError(f"completed Covertype member artifact binding differs: {spec.model_id}")
+    if details.get("record_identity") != spec.record():
+        raise ValueError(f"completed Covertype member record identity differs: {spec.model_id}")
+    if details.get("dataset_fingerprint") != dataset_fingerprint:
+        raise ValueError(f"completed Covertype member dataset fingerprint differs: {spec.model_id}")
+    if details.get("decaf_identity_passed") is not True:
+        raise ValueError(
+            f"completed Covertype member DECAF identity is not verified: {spec.model_id}"
+        )
+    if not artifact_path.is_file():
+        raise FileNotFoundError(f"completed Covertype member artifact is missing: {spec.model_id}")
+    if artifact_path.stat().st_size != int(details.get("artifact_size_bytes", -1)):
+        raise ValueError(f"completed Covertype member artifact size mismatch: {spec.model_id}")
+    if sha256_file(artifact_path) != details.get("artifact_sha256"):
+        raise ValueError(f"completed Covertype member artifact hash mismatch: {spec.model_id}")
+    record = _json_object(artifact_path, label=f"Covertype member {spec.model_id}")
+    expected_identity = spec.record()
+    for field, expected in expected_identity.items():
+        if record.get(field) != expected:
+            raise ValueError(f"completed Covertype member field {field} differs: {spec.model_id}")
+    if record.get("dataset_fingerprint") != dataset_fingerprint:
+        raise ValueError(f"completed Covertype member payload dataset differs: {spec.model_id}")
+    if record.get("decaf_identity_passed") is not True:
+        raise ValueError(
+            f"completed Covertype member payload failed DECAF identity: {spec.model_id}"
+        )
+    return record
+
+
 def _run_member(
     context: RunContext,
     dataset: CovertypeDataset,
     spec: ModelSpec,
 ) -> tuple[dict[str, Any], bool]:
     artifact_path, receipt_path = _member_paths(context.path, spec.model_id)
-    if context.resume and artifact_path.is_file() and receipt_path.is_file():
+    if context.resume and receipt_path.is_file():
         receipt = load_member_receipt(receipt_path)
         if receipt["status"] == "completed":
-            return json.loads(artifact_path.read_text(encoding="utf-8")), True
+            return (
+                _validate_completed_member(
+                    context.path,
+                    spec,
+                    dataset_fingerprint=dataset.fingerprint,
+                ),
+                True,
+            )
     started_at = utc_now()
     write_member_receipt(
         receipt_path,
@@ -411,6 +555,7 @@ def _run_member(
     try:
         record = evaluate_member(spec, dataset, context.config)
         atomic_json(artifact_path, record)
+        artifact_sha256 = sha256_file(artifact_path)
         write_member_receipt(
             receipt_path,
             spec.model_id,
@@ -418,7 +563,11 @@ def _run_member(
             started_at=started_at,
             details={
                 "artifact": f"raw/members/{spec.model_id}.json",
+                "artifact_sha256": artifact_sha256,
+                "artifact_size_bytes": artifact_path.stat().st_size,
+                "dataset_fingerprint": dataset.fingerprint,
                 "decaf_identity_passed": record["decaf_identity_passed"],
+                "record_identity": spec.record(),
             },
         )
         return record, False
@@ -434,11 +583,78 @@ def _run_member(
         raise
 
 
+def validate_compute_resume(context: RunContext) -> dict[str, Any]:
+    """Validate the exact configured member universe and every artifact digest."""
+
+    prepared = validate_prepare_resume(context)
+    specs = configured_specs(context.config)
+    expected_ids = {spec.model_id for spec in specs}
+    artifact_root = context.path / "raw" / "members"
+    receipt_root = context.path / "receipts" / "members"
+    artifact_ids = {path.stem for path in artifact_root.glob("*.json")}
+    receipt_ids = {path.stem for path in receipt_root.glob("*.json")}
+    if artifact_ids != expected_ids:
+        raise ValueError("completed Covertype member artifact inventory differs")
+    if receipt_ids != expected_ids:
+        raise ValueError("completed Covertype member receipt inventory differs")
+    for spec in specs:
+        _validate_completed_member(
+            context.path,
+            spec,
+            dataset_fingerprint=str(prepared["dataset_fingerprint"]),
+        )
+
+    global_receipt = _json_object(
+        context.path / "receipts" / "compute_members.json",
+        label="Covertype compute-members receipt",
+    )
+    if (
+        global_receipt.get("kind") != "global"
+        or global_receipt.get("run_id") != context.path.name
+        or global_receipt.get("status") != "completed"
+        or global_receipt.get("all_processes_exited") is not True
+        or global_receipt.get("member_count") != len(specs)
+    ):
+        raise ValueError("completed Covertype compute-members receipt differs")
+    members = global_receipt.get("members")
+    if not isinstance(members, dict) or set(members) != expected_ids:
+        raise ValueError("completed Covertype global member inventory differs")
+    if any(
+        not isinstance(value, dict) or value.get("status") != "completed"
+        for value in members.values()
+    ):
+        raise ValueError("completed Covertype global receipt has unfinished members")
+    details = global_receipt.get("details")
+    if (
+        not isinstance(details, dict)
+        or details.get("configured_members") != len(specs)
+        or details.get("completed_members") != len(specs)
+        or details.get("failure_count") != 0
+    ):
+        raise ValueError("completed Covertype global receipt counts differ")
+    index = _json_object(
+        context.path / "raw" / "compute_index.json", label="Covertype compute index"
+    )
+    if (
+        index.get("members") != sorted(expected_ids)
+        or index.get("module_c_members") != sum(spec.module == "C" for spec in specs)
+        or index.get("module_f_members") != sum(spec.module == "F" for spec in specs)
+    ):
+        raise ValueError("completed Covertype compute index differs")
+    return {
+        "configured_members": len(specs),
+        "validated_members": len(specs),
+        "dataset_fingerprint": prepared["dataset_fingerprint"],
+    }
+
+
 def compute(context: RunContext) -> dict[str, Any]:
     """Train configured members with atomic receipts and safe resume semantics."""
 
     if not (context.path / "raw" / "covertype_data.npz").is_file():
         prepare(context)
+    elif context.resume:
+        validate_prepare_resume(context)
     dataset = load_dataset(context.path)
     specs = configured_specs(context.config)
     records: list[dict[str, Any]] = []
@@ -506,4 +722,6 @@ __all__ = [
     "evaluate_member",
     "formal_specs",
     "prepare",
+    "validate_compute_resume",
+    "validate_prepare_resume",
 ]

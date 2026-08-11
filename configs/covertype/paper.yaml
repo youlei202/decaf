@@ -2,6 +2,7 @@ experiment: covertype
 schema_version: 1
 description: Full preregistered binary Covertype paper protocol.
 max_workers: 24
+reference_run: T0
 
 data:
   source: sklearn_covtype

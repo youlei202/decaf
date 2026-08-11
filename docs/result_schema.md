@@ -75,7 +75,10 @@ Member receipts use `running`, `failed`, or `completed`. Writers create a
 temporary file in the receipt directory, flush and synchronize it, and atomically
 replace the destination. A receipt is reusable only when it says `completed`,
 its input digests still match, and every artifact matches both byte count and
-SHA-256. Otherwise resume reruns that member.
+SHA-256. A non-terminal or failed receipt may be retried. A completed receipt
+whose identity, input digest, byte count, or artifact SHA-256 no longer matches
+is rejected fail-closed; use a clean run directory (or explicitly remove the
+stale member and receipt) before recomputing it.
 
 Global status is reduced from member receipts: any failed required member makes
 the run `failed`; missing required terminal receipts make it `partial`; all

@@ -399,7 +399,10 @@ def analyze_handler(context: RunContext) -> Mapping[str, Any]:
     else:
         receipts = materialize_controlled_references(
             paper_data,
-            reference_root=os.environ.get("DECAF_REFERENCE_RUNS_ROOT"),
+            # Let the shared resolver split DECAF_REFERENCE_RUNS_ROOT on
+            # os.pathsep. Passing the raw string here collapses multiple roots
+            # into one invalid path.
+            reference_root=None,
             repo_root=repository_root(),
         )
         source_kind = "sealed_reference_archives"

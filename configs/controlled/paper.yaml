@@ -1,0 +1,107 @@
+experiment: controlled
+profile: paper
+schema_version: 1
+max_workers: 32
+
+assets:
+  dataset_root: '${DECAF_DATA_ROOT}/3d_shapes'
+  c0_model_manifest: model_manifest.csv
+  c0_no_retraining: true
+
+base:
+  tasks: [object_color, object_shape, wall_color, color_shape_xor, context_gate]
+  architectures: [resnet18, small_vit]
+  seeds: [3101, 3102, 3103]
+  factors: [floor_color, wall_color, object_color, object_size, object_shape, object_orientation]
+  dynamic_samples: 4096
+  endpoint_samples: 8192
+  endpoint_epsilon: 0.0001
+  alpha_grid: [0.00, 0.0666666667, 0.1333333333, 0.20, 0.2666666667, 0.3333333333, 0.40, 0.4666666667, 0.5333333333, 0.60, 0.6666666667, 0.7333333333, 0.80, 0.8666666667, 0.9333333333, 1.00]
+  linear_lambda_grid: [0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]
+  geometries: [cmmr, diagonal, power]
+  power_betas: [0.25, 0.50, 0.75]
+
+endpoint_behavior:
+  architectures: [resnet18, small_vit]
+  causal_variants: [aligned, neutral, reversed]
+  causal_seeds: [5201, 5202, 5203]
+  fragility_variants: [fragile, neutral, robust]
+  fragility_seeds: [5301, 5302, 5303]
+  terminal_epoch: 20
+  expected_counts: {E: 52, C: 18, F: 18}
+  evidence_selection:
+    resnet18:
+      '0.95':
+        '5101': [1, 5, 9, 13, 18, 22, 26, 30]
+        '5102': [1, 5, 9, 13, 18, 22, 26, 30]
+      '0.99':
+        '5101': [1, 2, 27, 30]
+        '5102': [1, 6, 23, 30]
+    small_vit:
+      '0.95':
+        '5101': [1, 4, 7, 8, 15, 30]
+        '5102': [1, 6, 7, 8, 19, 30]
+      '0.99':
+        '5101': [1, 5, 9, 13, 18, 22, 26, 30]
+        '5102': [1, 5, 9, 13, 18, 22, 26, 30]
+  passes:
+    pass1:
+      samples_per_model_factor: 1024
+      alpha_grid: [0.00, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00]
+      noise_seeds: [6101, 6102]
+      counterfactual_maps: 2
+      geometries: [cmmr]
+    pass2:
+      samples_per_model_factor: 4096
+      endpoint_samples: 8192
+      alpha_grid: [0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]
+      noise_seeds: [6201, 6202, 6203, 6204]
+      counterfactual_maps: 2
+      geometries: [cmmr, pixel, diagonal, power]
+      power_betas: [0.25, 0.50, 0.75]
+  endpoint_epsilon: 0.0001
+  accumulation_dtype: float64
+  shared_noise_within_counterfactual_pair: true
+  bootstrap_repetitions: 500
+  bootstrap_confidence_level: 0.90
+
+contradiction:
+  tasks: [direct, gate, invert]
+  architectures: [resnet18, small_vit]
+  seeds: [7101, 7102, 7103, 7104, 7105]
+  expected_models: 30
+  wall_maps: [1, 2]
+  object_maps: [1, 2]
+  epsilon_grid: [0.000, 0.025, 0.050, 0.075, 0.100, 0.125, 0.150, 0.175, 0.200, 0.225, 0.250, 0.275, 0.300, 0.325, 0.350, 0.375, 0.400, 0.425, 0.450, 0.475, 0.500]
+  train_samples: 60000
+  validation_samples: 10000
+  test_pairs: 16384
+  epochs: 25
+  maximum_epochs: 35
+  bootstrap_repetitions: 2000
+
+expected_plan:
+  base_models: 30
+  base_model_factor_units: 180
+  evidence_checkpoints: 52
+  causal_checkpoints: 18
+  fragility_checkpoints: 18
+  endpoint_behavior_checkpoints: 88
+  endpoint_behavior_units_per_pass: 158
+  endpoint_behavior_units_total: 316
+  contradiction_models: 30
+  contradiction_evaluation_units: 30
+  scheduled_members: 556
+
+headline_targets:
+  figure_02_intended_abs: {expected: 0.05079873173186311, tolerance: 0.00000000000001}
+  figure_02_endpoint_null_abs: {expected: 0.05268779850012135, tolerance: 0.00000000000001}
+  figure_02_abs_false_null: {expected: 0.0732142857142857, tolerance: 0.00000000000001}
+  figure_02_align_false_null: {expected: 0.0, tolerance: 0.0}
+  figure_03_evidence_correspondence: {expected: 0.936, tolerance: 0.001}
+  figure_04_robust_f: {expected: 0.010, tolerance: 0.002}
+  figure_04_neutral_f: {expected: 0.098, tolerance: 0.002}
+  figure_04_fragile_f: {expected: 0.590, tolerance: 0.002}
+  figure_05_invert_c: {expected: 0.49999733161716053, tolerance: 0.000000000001}
+  figure_05_c_swap: {expected: 0.9606652000, tolerance: 0.0000000001}
+  figure_05_abs_swap: {expected: -0.0359076958, tolerance: 0.0000000001}

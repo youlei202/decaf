@@ -1,0 +1,76 @@
+experiment: controlled
+profile: smoke
+schema_version: 1
+max_workers: 2
+
+assets:
+  dataset_root: '${DECAF_DATA_ROOT}/3d_shapes'
+  c0_model_manifest: model_manifest.csv
+  c0_no_retraining: true
+
+base:
+  tasks: [object_shape]
+  architectures: [resnet18]
+  seeds: [3101]
+  factors: [object_shape]
+  dynamic_samples: 8
+  endpoint_samples: 8
+  endpoint_epsilon: 0.02
+  alpha_grid: [0.0, 0.5, 1.0]
+  geometries: [cmmr]
+
+endpoint_behavior:
+  architectures: [resnet18]
+  causal_variants: [aligned]
+  causal_seeds: [5201]
+  fragility_variants: [fragile]
+  fragility_seeds: [5301]
+  terminal_epoch: 1
+  expected_counts: {E: 1, C: 1, F: 1}
+  evidence_selection:
+    resnet18:
+      '0.95':
+        '5101': [1]
+  passes:
+    pass2:
+      samples_per_model_factor: 8
+      endpoint_samples: 8
+      alpha_grid: [0.0, 0.5, 1.0]
+      noise_seeds: [6201]
+      counterfactual_maps: 1
+      geometries: [cmmr]
+  endpoint_epsilon: 0.02
+  accumulation_dtype: float64
+  shared_noise_within_counterfactual_pair: true
+  bootstrap_repetitions: 10
+  bootstrap_confidence_level: 0.90
+
+contradiction:
+  tasks: [invert]
+  architectures: [resnet18]
+  seeds: [7101]
+  expected_models: 1
+  wall_maps: [1]
+  object_maps: [1]
+  epsilon_grid: [0.0, 0.5]
+  train_samples: 8
+  validation_samples: 4
+  test_pairs: 4
+  epochs: 1
+  maximum_epochs: 1
+  bootstrap_repetitions: 10
+
+expected_plan:
+  base_models: 1
+  base_model_factor_units: 1
+  evidence_checkpoints: 1
+  causal_checkpoints: 1
+  fragility_checkpoints: 1
+  endpoint_behavior_checkpoints: 3
+  endpoint_behavior_units_per_pass: 5
+  endpoint_behavior_units_total: 5
+  contradiction_models: 1
+  contradiction_evaluation_units: 1
+  scheduled_members: 8
+
+headline_targets: {}

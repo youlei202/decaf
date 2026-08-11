@@ -12,6 +12,12 @@ import yaml
 
 from decaf.paper.manifest import load_visual_manifest
 from decaf.paper.reference import load_reference_runs
+from decaf.paper.semantic import (
+    CANONICAL_COLUMNS,
+    CANONICAL_SCHEMA_SHA256,
+    semantic_contract,
+    semantic_contract_sha256,
+)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 SCRIPT = REPOSITORY / "scripts" / "reproduce" / "package_release.py"
@@ -21,6 +27,7 @@ PACKAGE_RELEASE = module_from_spec(SPEC)
 SPEC.loader.exec_module(PACKAGE_RELEASE)
 _archive_repository = PACKAGE_RELEASE._archive_repository
 _validate_analysis_artifacts = PACKAGE_RELEASE._validate_analysis_artifacts
+_validate_canonical_receipt = PACKAGE_RELEASE._validate_canonical_receipt
 _require_passed_reports = PACKAGE_RELEASE._require_passed_reports
 _validate_historical_drift = PACKAGE_RELEASE._validate_historical_drift
 _validate_package_manifest = PACKAGE_RELEASE._validate_package_manifest
@@ -120,7 +127,7 @@ def _analysis_artifact_fixture(
     verification = tmp_path / "verification"
     verification.mkdir(parents=True)
     manifest = load_visual_manifest(REPOSITORY / "paper/visual_manifest.yaml")
-    schema_sha256 = hashlib.sha256(b"canonical-schema").hexdigest()
+    schema_sha256 = CANONICAL_SCHEMA_SHA256
     canonical_rows: list[dict[str, object]] = []
     diff_rows: list[dict[str, object]] = []
     generated_paths: list[str] = []
@@ -141,18 +148,57 @@ def _analysis_artifact_fixture(
         row_count: int | str = ""
         panel_cardinality: dict[str, int] = {}
         if asset.status != "source_missing":
+            contract = semantic_contract(asset)
+            if "panels" in contract:
+                panel_cardinality = {
+                    str(panel): int(count) for panel, count in contract["panels"].items()
+                }
+            else:
+                panel_cardinality = {
+                    "table_body": int(contract.get("exact_rows", contract.get("minimum_rows", 1)))
+                }
             canonical_relative = f"paper_outputs/canonical/{subdirectory}/{asset.asset_id}.csv"
             canonical = verification / canonical_relative
             canonical.parent.mkdir(parents=True, exist_ok=True)
-            canonical.write_text(
-                f"artifact_id,value\n{asset.asset_id},1\n",
-                encoding="utf-8",
-            )
+            source_sha256 = hashlib.sha256(f"source:{asset.asset_id}".encode()).hexdigest()
+            rows = []
+            for panel, count in panel_cardinality.items():
+                for index in range(count):
+                    rows.append(
+                        {
+                            "artifact_id": asset.asset_id,
+                            "panel_id": panel,
+                            "series": "fixture",
+                            "x": index,
+                            "y": float(index + 1),
+                            "estimate": float(index + 1),
+                            "ci_low": float(index),
+                            "ci_high": float(index + 2),
+                            "n": 1,
+                            "source_sha256": source_sha256,
+                            "record_json": json.dumps(
+                                {
+                                    "artifact_id": asset.asset_id,
+                                    "index": index,
+                                    "panel_id": panel,
+                                },
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                        }
+                    )
+            with canonical.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(
+                    stream,
+                    fieldnames=CANONICAL_COLUMNS,
+                    lineterminator="\n",
+                )
+                writer.writeheader()
+                writer.writerows(rows)
             canonical_paths.append(canonical_relative)
             canonical_sha256 = hashlib.sha256(canonical.read_bytes()).hexdigest()
-            semantic_sha256 = hashlib.sha256(f"contract:{asset.asset_id}".encode()).hexdigest()
-            row_count = 1
-            panel_cardinality = {"main": 1}
+            semantic_sha256 = semantic_contract_sha256(asset)
+            row_count = len(rows)
             canonical_rows.append(
                 {
                     "asset_id": asset.asset_id,
@@ -163,12 +209,12 @@ def _analysis_artifact_fixture(
                     "semantic_contract_sha256": semantic_sha256,
                     "schema_sha256": schema_sha256,
                     "row_count": row_count,
-                    "panel_count": 1,
+                    "panel_count": len(panel_cardinality),
                     "panel_cardinality": panel_cardinality,
-                    "source_sha256s": [],
-                    "resolved_source_sha256s": [],
-                    "source_lineage": {},
-                    "representative_case_ids": [],
+                    "source_sha256s": [source_sha256],
+                    "resolved_source_sha256s": [source_sha256],
+                    "source_lineage": {source_sha256: [source_sha256]},
+                    "representative_case_ids": list(contract.get("representative_case_ids", [])),
                 }
             )
         comparison = (
@@ -204,10 +250,20 @@ def _analysis_artifact_fixture(
     canonical_receipt = {
         "schema_version": 1,
         "status": "completed",
-        "required_columns": ["artifact_id", "record_json"],
+        "required_columns": list(CANONICAL_COLUMNS),
         "schema_sha256": schema_sha256,
         "artifact_count": len(canonical_rows),
-        "contract_set_sha256": hashlib.sha256(b"contract-set").hexdigest(),
+        "contract_set_sha256": hashlib.sha256(
+            json.dumps(
+                {
+                    asset.asset_id: semantic_contract_sha256(asset)
+                    for asset in manifest.assets.values()
+                    if asset.status != "source_missing"
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest(),
         "artifacts": canonical_rows,
     }
     canonical_receipt_path = verification / "paper_outputs/receipts/canonical_receipt.json"
@@ -438,6 +494,90 @@ def test_analysis_artifact_inventory_closes_and_rejects_tamper(
         _validate_analysis_artifacts(analysis, verification, REPOSITORY)
 
 
+def test_canonical_receipt_rejects_hash_consistent_semantic_tamper(
+    tmp_path: Path,
+) -> None:
+    verification, analysis = _analysis_artifact_fixture(tmp_path)
+    manifest = load_visual_manifest(REPOSITORY / "paper/visual_manifest.yaml")
+    assets = list(manifest.assets.values())
+    canonical_path = verification / "paper_outputs/canonical/figures/figure_02.csv"
+    source_sha256 = hashlib.sha256(b"forged-source").hexdigest()
+    forged_row = {column: "" for column in CANONICAL_COLUMNS}
+    forged_row.update(
+        {
+            "artifact_id": "figure_02",
+            "panel_id": "forged",
+            "series": "fixture",
+            "x": 0,
+            "y": 1.0,
+            "estimate": 1.0,
+            "ci_low": 0.0,
+            "ci_high": 2.0,
+            "n": 1,
+            "source_sha256": source_sha256,
+            "record_json": "{}",
+        }
+    )
+    with canonical_path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=CANONICAL_COLUMNS,
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        writer.writerow(forged_row)
+    forged_sha256 = hashlib.sha256(canonical_path.read_bytes()).hexdigest()
+
+    receipt_path = verification / "paper_outputs/receipts/canonical_receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    item = next(row for row in receipt["artifacts"] if row["asset_id"] == "figure_02")
+    item.update(
+        {
+            "sha256": forged_sha256,
+            "size_bytes": canonical_path.stat().st_size,
+            "row_count": 1,
+            "panel_count": 1,
+            "panel_cardinality": {"forged": 1},
+            "source_sha256s": [source_sha256],
+            "resolved_source_sha256s": [source_sha256],
+            "source_lineage": {source_sha256: [source_sha256]},
+        }
+    )
+    _write_json(receipt_path, receipt)
+
+    relative_index = {
+        str(record["relative_path"]): dict(record) for record in analysis["artifact_inventory"]
+    }
+    canonical_record = relative_index["paper_outputs/canonical/figures/figure_02.csv"]
+    canonical_record.update(
+        {
+            "sha256": forged_sha256,
+            "size_bytes": canonical_path.stat().st_size,
+        }
+    )
+    with (verification / "paper_artifact_diff.csv").open(
+        encoding="utf-8",
+        newline="",
+    ) as stream:
+        diff_by_id = {row["asset_id"]: row for row in csv.DictReader(stream)}
+    diff_by_id["figure_02"].update(
+        {
+            "canonical_sha256": forged_sha256,
+            "row_count": "1",
+            "panel_cardinality": '{"forged":1}',
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="panel structure drifted"):
+        _validate_canonical_receipt(
+            verification,
+            manifest,
+            assets,
+            relative_index,
+            diff_by_id,
+        )
+
+
 def test_analysis_artifacts_reject_extra_symlink_and_escaping_path(
     tmp_path: Path,
 ) -> None:
@@ -488,6 +628,14 @@ def test_public_package_payload_rejects_private_paths_and_pdfs(
     with pytest.raises(RuntimeError, match="contains CJK text"):
         _validate_public_package_payload(package)
     (verification / "report.json").write_text('{"status":"passed"}\n', encoding="utf-8")
+    notice = repository / "NOTICE"
+    notice.write_text(
+        "cache=/" + "work" + "/" + "Lei" + "/private\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="private absolute path"):
+        _validate_public_package_payload(package)
+    notice.write_text("portable\n", encoding="utf-8")
     (repository / "forbidden.pdf").write_bytes(b"%PDF")
     with pytest.raises(RuntimeError, match="contains a PDF"):
         _validate_public_package_payload(package)

@@ -23,6 +23,12 @@ import yaml
 from decaf.experiments.common import atomic_json, atomic_text
 from decaf.paper.manifest import load_visual_manifest
 from decaf.paper.reference import load_reference_runs
+from decaf.paper.semantic import (
+    CANONICAL_COLUMNS,
+    CANONICAL_SCHEMA_SHA256,
+    load_canonical_asset,
+    semantic_contract_sha256,
+)
 
 PROVENANCE_FILES = (
     "historical_git_state.json",
@@ -401,12 +407,19 @@ def _validate_canonical_receipt(
     canonical = _read_json(verification / "paper_outputs" / "receipts" / "canonical_receipt.json")
     canonical_rows = canonical.get("artifacts")
     canonical_ids = [asset.asset_id for asset in assets if asset.asset_id != "figure_01"]
+    expected_contract_set_sha256 = _json_sha256(
+        {
+            asset_id: semantic_contract_sha256(manifest.assets[asset_id])
+            for asset_id in canonical_ids
+        }
+    )
     if (
         canonical.get("schema_version") != 1
         or canonical.get("status") != "completed"
         or canonical.get("artifact_count") != 27
-        or not _is_sha256(canonical.get("schema_sha256"))
-        or not _is_sha256(canonical.get("contract_set_sha256"))
+        or canonical.get("required_columns") != list(CANONICAL_COLUMNS)
+        or canonical.get("schema_sha256") != CANONICAL_SCHEMA_SHA256
+        or canonical.get("contract_set_sha256") != expected_contract_set_sha256
         or not isinstance(canonical_rows, list)
         or [row.get("asset_id") for row in canonical_rows if isinstance(row, Mapping)]
         != canonical_ids
@@ -447,6 +460,11 @@ def _validate_canonical_receipt(
             != json.dumps(item["panel_cardinality"], sort_keys=True, separators=(",", ":"))
         ):
             raise RuntimeError(f"paper diff and canonical receipt disagree: {asset_id}")
+        load_canonical_asset(
+            verification / "paper_outputs",
+            asset,
+            canonical,
+        )
     return canonical
 
 
@@ -626,6 +644,7 @@ def _validate_public_package_payload(package: Path) -> dict[str, Any]:
     roots = (package / "repository", package / "verification")
     private_fragments = (
         "/" + "work" + "/" + "Users" + "/",
+        "/" + "work" + "/" + "Lei",
         "/" + "Users" + "/",
         "/" + "home" + "/",
         "/" + "mnt" + "/",
@@ -644,12 +663,15 @@ def _validate_public_package_payload(package: Path) -> dict[str, Any]:
             scanned += 1
             if path.suffix.lower() == ".pdf":
                 raise RuntimeError(f"public package contains a PDF: {path}")
-            if path.suffix.lower() not in PUBLIC_TEXT_SUFFIXES:
-                continue
+            declared_text = path.suffix.lower() in PUBLIC_TEXT_SUFFIXES
             try:
                 content = path.read_text(encoding="utf-8")
             except UnicodeDecodeError as error:
-                raise RuntimeError(f"public package text is not UTF-8: {path}") from error
+                if declared_text:
+                    raise RuntimeError(f"public package text is not UTF-8: {path}") from error
+                continue
+            if not declared_text and "\0" in content:
+                continue
             if any(fragment in content for fragment in private_fragments):
                 raise RuntimeError(f"public package contains a private absolute path: {path}")
             if any(

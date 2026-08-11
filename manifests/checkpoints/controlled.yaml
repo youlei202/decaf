@@ -20,6 +20,7 @@ groups:
         package: protocol_robust_main_v2_20260805T211038Z_lightweight.zip
         package_sha256: 2126b7fcf720e367ca6dd6ed7c467c45ef20199364685d10372a96efa7ebf559
     logical_manifest_sha256: 1ab5454942f354f56bf8b95ffff9641bbe28c6829def387db2afaf2b1e335ad4
+    portable_registry_sha256: 6b7978f2daf18558d698c578f5bd125e36d7a28195b259eb5e3d89f5ebcc74e9
   - id: selected_evidence_states
     count: 88
     composition:
@@ -36,6 +37,7 @@ groups:
       model_manifest_sha256: 22a3519ef81f310962addc6fb18eb1812d227630c0ec3e7239e57e26bb37263d
       selected_model_counts_sha256: 03d1d167e9ec5500d6df7cc3631f4b22ceb61e8c0b96cc692e28618cadb0fae0
       endpoint_selection_sha256: 87495a748a46119f83c2224222291ab78881fdf82babbe015a124fda04d12d4b
+    portable_registry_sha256: 80bd8afdfd3c660be55345df0281ebb64cacd4f0aa2754950ce40d6fb50c0644
     provenance:
       package: endpoint_behavior_v1_b200_20260806T143355Z_lightweight.zip
       package_sha256: 387c5a572249110a31698d384d942a8e1adf542c7c0b1a9f3a0c5d453102a8a7
@@ -52,4 +54,5 @@ groups:
       provenance:
         package: context_swap_c_v1_20260806T193622Z_lightweight.zip
         package_sha256: 26bc5bc4a9efd5e23d6b34372f5ebce9c3563bb4d5659bc847c4344c67fe7ede
+    portable_registry_sha256: ca9c333fe206edb4578e154042f298bc38c3ff7c8c74e2618f8bef06ba738fb0
 license_note: Author-trained weights are not offered as a public download by this repository.

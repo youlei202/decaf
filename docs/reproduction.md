@@ -81,22 +81,29 @@ Controlled paper compute is a deliberately explicit accelerator boundary. Its
 `prepare` stage verifies the Shapes3D bytes and all C0, C1, and C2 checkpoint
 manifests beneath `$DECAF_CACHE_ROOT/checkpoints/controlled`. Its `compute`
 stage does not launch GPU work on a CPU host. It ingests the bundle named by
-`$DECAF_CONTROLLED_GPU_OUTPUT_ROOT`, requiring exact configuration and member-plan
-fingerprints, 600 member artifacts with registered SHA-256 digests, and a
-14-file analysis manifest. The producer declares the accelerator execution
-class; this loader verifies byte identity without claiming an independent GPU
-rerun.
+`$DECAF_CONTROLLED_GPU_OUTPUT_ROOT`, requiring the exact 600-member universe,
+registered artifact SHA-256 digests, and a 14-file analysis manifest. The
+producer declares the accelerator execution class; this loader verifies byte
+identity and lineage without claiming an independent GPU rerun.
 
 The accelerator bundle contract is machine-readable. `manifests/members.json`
-uses `kind: controlled_members`, records the plan-emitted
-`configuration_sha256` and `member_contract_sha256`, declares
-`producer_execution_class: accelerator`, and contains one
-`member_id`/`output`/`size`/`sha256` record per planned member. Each referenced
-JSON output repeats its `member_id`, `phase`, `status: completed`, and
-`schema_version: 1`. `manifests/analysis.json` uses
-`kind: controlled_analysis` and the standard file-manifest schema for the exact
-`analysis/C0`, `analysis/C1`, and `analysis/C2` inputs consumed by the frozen
-schema adapters.
+uses `schema_version: 2`, `kind: controlled_members`, and
+`producer_execution_class: accelerator`. Its `run_bindings` object pins the
+portable configuration and member contract plus the exact prepared
+`config.yaml`, plan, jobs, data, checkpoint manifest, and canonical checkpoint
+inventory bytes. It contains one `member_id`/`output`/`size`/`sha256` record per
+planned member, with no extras. Each referenced JSON output uses
+`kind: controlled_member_result` and binds its full member specification,
+dependencies and dependency-artifact hashes, checkpoint/cache inputs, produced
+checkpoint identities, and a nonempty phase result. Identity-only completion
+JSON is rejected.
+
+`manifests/analysis.json` uses `schema_version: 2` and
+`kind: controlled_analysis`. It repeats the run bindings and the SHA-256 of
+`manifests/members.json`, then registers exactly the `analysis/C0`,
+`analysis/C1`, and `analysis/C2` files consumed by the frozen schema adapters.
+Completed member receipts repeat the member-spec and run bindings, so resume is
+allowed only while every local artifact still matches its registered bytes.
 
 Before allocating hardware, inspect the exact static plan without executing it:
 

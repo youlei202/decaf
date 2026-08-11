@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import yaml
 
 from decaf.core.manifests import atomic_write_json, sha256_file
 from decaf.core.receipts import (
@@ -20,7 +21,7 @@ from decaf.core.receipts import (
     load_member_receipt,
     write_member_receipt,
 )
-from decaf.experiments.common import RunContext, atomic_text
+from decaf.experiments.common import RunContext, atomic_text, repository_root
 from decaf.experiments.controlled.models import SHA256_PATTERN, expected_base_models
 from decaf.experiments.controlled.protocols import (
     analytic_context_mixture,
@@ -78,7 +79,22 @@ class MaterializedMemberBundle:
     root: Path
     manifest: Path
     producer_execution_class: str
+    run_bindings: Mapping[str, str]
     artifacts: Mapping[str, MaterializedMemberArtifact]
+
+
+RUN_BINDING_KEYS = frozenset(
+    {
+        "configuration_sha256",
+        "member_contract_sha256",
+        "config_file_sha256",
+        "plan_manifest_sha256",
+        "jobs_manifest_sha256",
+        "data_manifest_sha256",
+        "checkpoint_manifest_sha256",
+        "checkpoint_inventory_sha256",
+    }
+)
 
 
 def _safe_token(value: Any) -> str:
@@ -290,6 +306,219 @@ def member_contract_sha256(members: Sequence[PlanMember]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def member_spec_sha256(member: PlanMember) -> str:
+    """Fingerprint one exact member, including dependencies and scientific metadata."""
+
+    encoded = json.dumps(
+        member.as_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def prepared_run_bindings(
+    context: RunContext,
+    members: Sequence[PlanMember],
+) -> dict[str, str]:
+    """Hash the canonical prepared run inputs consumed by an accelerator producer."""
+
+    paths = {
+        "config_file_sha256": context.path / "config.yaml",
+        "plan_manifest_sha256": context.path / "manifests" / "plan.json",
+        "jobs_manifest_sha256": context.path / "manifests" / "jobs.jsonl",
+        "data_manifest_sha256": context.path / "manifests" / "data.json",
+        "checkpoint_manifest_sha256": context.path / "manifests" / "checkpoints.json",
+        "checkpoint_inventory_sha256": (
+            repository_root() / "manifests" / "checkpoints" / "controlled.yaml"
+        ),
+    }
+    missing = [str(path) for path in paths.values() if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"Controlled prepared run bindings are missing: {missing}")
+    persisted_config = yaml.safe_load(paths["config_file_sha256"].read_text(encoding="utf-8"))
+    if not isinstance(persisted_config, Mapping):
+        raise ValueError("prepared Controlled config must be an object")
+    plan = json.loads(paths["plan_manifest_sha256"].read_text(encoding="utf-8"))
+    config_digest = configuration_sha256(context.config)
+    contract_digest = member_contract_sha256(members)
+    expected_members = [member.as_dict() for member in members]
+    if configuration_sha256(persisted_config) != config_digest:
+        raise ValueError("prepared Controlled config file does not match the active config")
+    if plan.get("configuration_sha256") != config_digest:
+        raise ValueError("prepared Controlled plan configuration fingerprint mismatch")
+    if plan.get("member_contract_sha256") != contract_digest:
+        raise ValueError("prepared Controlled plan member fingerprint mismatch")
+    if plan.get("members") != expected_members:
+        raise ValueError("prepared Controlled plan member universe mismatch")
+    jobs = [
+        json.loads(line)
+        for line in paths["jobs_manifest_sha256"].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if jobs != expected_members:
+        raise ValueError("prepared Controlled jobs manifest does not match the plan")
+    checkpoint_manifest = json.loads(
+        paths["checkpoint_manifest_sha256"].read_text(encoding="utf-8")
+    )
+    canonical = checkpoint_manifest.get("canonical_inventory")
+    if canonical is not None:
+        if not isinstance(canonical, Mapping):
+            raise ValueError("Controlled checkpoint canonical inventory must be an object")
+        if canonical.get("sha256") != sha256_file(paths["checkpoint_inventory_sha256"]):
+            raise ValueError("Controlled checkpoint inventory fingerprint mismatch")
+        inventory = yaml.safe_load(
+            paths["checkpoint_inventory_sha256"].read_text(encoding="utf-8")
+        )
+        raw_groups = inventory.get("groups") if isinstance(inventory, Mapping) else None
+        if not isinstance(raw_groups, list):
+            raise ValueError("canonical Controlled checkpoint inventory has no groups")
+        groups = {
+            str(group.get("id")): group for group in raw_groups if isinstance(group, Mapping)
+        }
+        raw_items = checkpoint_manifest.get("items")
+        if not isinstance(raw_items, list):
+            raise ValueError("prepared Controlled checkpoint manifest has no items")
+        items = {str(item.get("id")): item for item in raw_items if isinstance(item, Mapping)}
+        group_for_item = {
+            "c0_base_models": "base_models",
+            "c1_selected_checkpoints": "selected_evidence_states",
+            "c2_context_swap": "context_swap",
+        }
+        if set(items) != set(group_for_item):
+            raise ValueError("prepared Controlled checkpoint group universe mismatch")
+        for item_id, group_id in group_for_item.items():
+            if groups.get(group_id, {}).get("portable_registry_sha256") != items[item_id].get(
+                "portable_registry_sha256"
+            ):
+                raise ValueError(
+                    f"prepared Controlled checkpoint registry mismatch: {item_id}"
+                )
+    bindings = {
+        "configuration_sha256": config_digest,
+        "member_contract_sha256": contract_digest,
+        **{name: sha256_file(path) for name, path in paths.items()},
+    }
+    if set(bindings) != RUN_BINDING_KEYS:
+        raise AssertionError("Controlled run-binding key coverage changed")
+    return bindings
+
+
+def checkpoint_bindings_from_manifest(path: str | Path) -> dict[str, dict[str, dict[str, Any]]]:
+    """Load portable checkpoint/cache identities from a prepared run manifest."""
+
+    source = Path(path).resolve(strict=True)
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise ValueError("Controlled checkpoint manifest items must be a list")
+    checkpoints: dict[str, dict[str, Any]] = {}
+    probability_caches: dict[str, dict[str, Any]] = {}
+
+    def add_record(
+        destination: dict[str, dict[str, Any]],
+        raw: Any,
+        *,
+        kind: str,
+    ) -> None:
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"Controlled {kind} binding must be an object")
+        model_id = str(raw.get("model_id", ""))
+        digest = str(raw.get("sha256", "")).lower()
+        logical_path = str(raw.get("logical_path", ""))
+        try:
+            size = int(raw.get("bytes"))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Controlled {kind} binding has an invalid byte count") from error
+        if (
+            not model_id
+            or model_id in destination
+            or not SHA256_PATTERN.fullmatch(digest)
+            or not logical_path
+            or Path(logical_path).is_absolute()
+            or ".." in Path(logical_path).parts
+            or size < 1
+        ):
+            raise ValueError(f"Controlled {kind} binding is invalid or duplicated: {model_id}")
+        record: dict[str, Any] = {
+            "model_id": model_id,
+            "logical_path": logical_path,
+            "bytes": size,
+            "sha256": digest,
+        }
+        producer = raw.get("producer_member_id")
+        if producer is not None:
+            record["producer_member_id"] = str(producer)
+        destination[model_id] = record
+
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise ValueError("Controlled checkpoint manifest item must be an object")
+        for record in item.get("checkpoints", ()):
+            add_record(checkpoints, record, kind="checkpoint")
+        for record in item.get("probability_caches", ()):
+            add_record(probability_caches, record, kind="probability-cache")
+    checkpoint_paths = [record["logical_path"] for record in checkpoints.values()]
+    cache_paths = [record["logical_path"] for record in probability_caches.values()]
+    all_paths = checkpoint_paths + cache_paths
+    if len(all_paths) != len(set(all_paths)):
+        raise ValueError("Controlled checkpoint/cache logical paths must be globally unique")
+    return {"checkpoints": checkpoints, "probability_caches": probability_caches}
+
+
+def validate_checkpoint_binding_universe(
+    members: Sequence[PlanMember],
+    bindings: Mapping[str, Mapping[str, Mapping[str, Any]]],
+) -> None:
+    """Require exactly the checkpoint/cache identities implied by the static plan."""
+
+    expected_checkpoints: dict[str, tuple[str, str | None]] = {}
+    expected_caches: dict[str, str] = {}
+    consumers: set[str] = set()
+    for member in members:
+        model_id_value = str(member.metadata.get("model_id", ""))
+        if member.phase == "c0_evaluate":
+            expected_checkpoints[model_id_value] = (
+                f"checkpoints/c0/{model_id_value}.pt",
+                None,
+            )
+            expected_caches[model_id_value] = (
+                f"probability_caches/c0/{model_id_value}.npy"
+            )
+        elif member.phase in {"c1_train", "c2_train"}:
+            family = "c1" if member.phase == "c1_train" else "c2"
+            for output in member.metadata.get("checkpoint_outputs", ()):
+                identifier = Path(str(output)).stem
+                expected_checkpoints[identifier] = (
+                    f"checkpoints/{family}/{identifier}.pt",
+                    member.member_id,
+                )
+        elif member.phase in {"c1_measure", "c2_evaluate"}:
+            consumers.add(model_id_value)
+
+    checkpoints = bindings.get("checkpoints", {})
+    caches = bindings.get("probability_caches", {})
+    if set(checkpoints) != set(expected_checkpoints):
+        raise ValueError("Controlled checkpoint binding universe does not match the plan")
+    if set(caches) != set(expected_caches):
+        raise ValueError("Controlled probability-cache binding universe does not match the plan")
+    if not consumers.issubset(expected_checkpoints):
+        raise ValueError("Controlled evaluation member has no planned checkpoint producer")
+    for identifier, (logical_path, producer) in expected_checkpoints.items():
+        record = checkpoints[identifier]
+        if record.get("logical_path") != logical_path:
+            raise ValueError(f"Controlled checkpoint logical path mismatch: {identifier}")
+        if producer is None:
+            if "producer_member_id" in record:
+                raise ValueError(f"C0 checkpoint unexpectedly declares a producer: {identifier}")
+        elif record.get("producer_member_id") != producer:
+            raise ValueError(f"Controlled checkpoint producer mismatch: {identifier}")
+    for identifier, logical_path in expected_caches.items():
+        record = caches[identifier]
+        if record.get("logical_path") != logical_path or "producer_member_id" in record:
+            raise ValueError(f"Controlled probability-cache binding mismatch: {identifier}")
+
+
 def write_jobs_manifest(path: str | Path, members: Sequence[PlanMember]) -> Path:
     """Atomically persist the sorted JSONL schedule contract."""
 
@@ -342,11 +571,144 @@ def _contained_file(root: Path, relative_value: str, *, label: str) -> Path:
     return candidate
 
 
+def _portable_checkpoint(record: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: record[key]
+        for key in ("model_id", "logical_path", "bytes", "sha256", "producer_member_id")
+        if key in record
+    }
+
+
+def member_checkpoint_contract(
+    member: PlanMember,
+    bindings: Mapping[str, Mapping[str, Mapping[str, Any]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    checkpoints = bindings.get("checkpoints", {})
+    caches = bindings.get("probability_caches", {})
+    model_id_value = str(member.metadata.get("model_id", ""))
+
+    def checkpoint(identifier: str) -> dict[str, Any]:
+        try:
+            return _portable_checkpoint(checkpoints[identifier])
+        except KeyError as error:
+            raise ValueError(
+                f"Controlled member {member.member_id} has no prepared checkpoint binding: "
+                f"{identifier}"
+            ) from error
+
+    checkpoint_inputs: list[dict[str, Any]] = []
+    cache_inputs: list[dict[str, Any]] = []
+    produced: list[dict[str, Any]] = []
+    if member.phase == "c0_evaluate":
+        checkpoint_inputs.append(checkpoint(model_id_value))
+        try:
+            cache_inputs.append(_portable_checkpoint(caches[model_id_value]))
+        except KeyError as error:
+            raise ValueError(
+                f"Controlled member {member.member_id} has no prepared probability-cache binding"
+            ) from error
+    elif member.phase in {"c1_measure", "c2_evaluate"}:
+        checkpoint_inputs.append(checkpoint(model_id_value))
+    elif member.phase in {"c1_train", "c2_train"}:
+        output_ids = [
+            Path(str(path)).stem
+            for path in member.metadata.get("checkpoint_outputs", ())
+        ]
+        if not output_ids:
+            raise ValueError(
+                f"Controlled training member has no checkpoint outputs: {member.member_id}"
+            )
+        for identifier in output_ids:
+            record = checkpoint(identifier)
+            if record.get("producer_member_id") != member.member_id:
+                raise ValueError(
+                    f"Controlled checkpoint producer binding mismatch: {identifier}"
+                )
+            produced.append(record)
+    else:
+        raise ValueError(f"unknown Controlled member phase: {member.phase}")
+    return (
+        sorted(checkpoint_inputs, key=lambda row: str(row["model_id"])),
+        sorted(cache_inputs, key=lambda row: str(row["model_id"])),
+        sorted(produced, key=lambda row: str(row["model_id"])),
+    )
+
+
+def _validate_member_document(
+    document: Mapping[str, Any],
+    member: PlanMember,
+    *,
+    run_bindings: Mapping[str, str],
+    checkpoint_bindings: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    dependency_artifacts: Mapping[str, MaterializedMemberArtifact],
+) -> None:
+    identity = (
+        document.get("schema_version") == 2
+        and document.get("kind") == "controlled_member_result"
+        and document.get("member_id") == member.member_id
+        and document.get("phase") == member.phase
+        and document.get("status") == "completed"
+        and document.get("member_spec_sha256") == member_spec_sha256(member)
+        and document.get("run_bindings") == dict(run_bindings)
+        and document.get("dependencies") == list(member.dependencies)
+    )
+    if not identity:
+        raise ValueError(
+            f"materialized output identity or run binding mismatch: {member.member_id}"
+        )
+    checkpoint_inputs, cache_inputs, produced = member_checkpoint_contract(
+        member, checkpoint_bindings
+    )
+    expected_inputs = {
+        "data_manifest_sha256": run_bindings["data_manifest_sha256"],
+        "checkpoint_manifest_sha256": run_bindings["checkpoint_manifest_sha256"],
+        "checkpoints": checkpoint_inputs,
+        "probability_caches": cache_inputs,
+    }
+    if document.get("input_bindings") != expected_inputs:
+        raise ValueError(f"materialized scientific input binding mismatch: {member.member_id}")
+    if document.get("produced_checkpoints") != produced:
+        raise ValueError(f"materialized checkpoint output binding mismatch: {member.member_id}")
+    expected_dependencies = {
+        dependency: dependency_artifacts[dependency].sha256 for dependency in member.dependencies
+    }
+    if document.get("dependency_artifacts") != expected_dependencies:
+        raise ValueError(f"materialized dependency artifact mismatch: {member.member_id}")
+    result = document.get("result")
+    if not isinstance(result, Mapping):
+        raise ValueError(f"materialized scientific result is missing: {member.member_id}")
+    try:
+        record_count = int(result.get("record_count"))
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"materialized scientific result has an invalid record count: {member.member_id}"
+        ) from error
+    metrics = result.get("metrics")
+    numeric_metrics = (
+        [
+            float(value)
+            for value in metrics.values()
+            if isinstance(value, (int, float, np.integer, np.floating))
+            and not isinstance(value, (bool, np.bool_))
+        ]
+        if isinstance(metrics, Mapping)
+        else []
+    )
+    if (
+        result.get("schema") != f"{member.phase}_summary_v1"
+        or record_count < 1
+        or not numeric_metrics
+        or not np.isfinite(numeric_metrics).all()
+    ):
+        raise ValueError(f"materialized scientific result contract failed: {member.member_id}")
+
+
 def validate_materialized_member_bundle(
     root: str | Path,
     members: Sequence[PlanMember],
     *,
-    config_sha256: str,
+    run_bindings: Mapping[str, str],
+    checkpoint_bindings: Mapping[str, Mapping[str, Mapping[str, Any]]],
     manifest_relative: str = "manifests/members.json",
 ) -> MaterializedMemberBundle:
     """Validate exact member/path/size/hash coverage for accelerator outputs.
@@ -361,22 +723,26 @@ def validate_materialized_member_bundle(
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
         raise ValueError("materialized member manifest must be an object")
-    if payload.get("schema_version") != 1 or payload.get("kind") != "controlled_members":
+    if payload.get("schema_version") != 2 or payload.get("kind") != "controlled_members":
         raise ValueError("materialized member manifest has an unsupported schema")
     producer_execution_class = str(payload.get("producer_execution_class", ""))
     if producer_execution_class != "accelerator":
         raise ValueError("materialized members must declare the accelerator execution class")
-    if payload.get("configuration_sha256") != config_sha256:
-        raise ValueError("materialized member configuration fingerprint mismatch")
-    expected_contract = member_contract_sha256(members)
-    if payload.get("member_contract_sha256") != expected_contract:
-        raise ValueError("materialized member-plan fingerprint mismatch")
+    expected_bindings = {str(key): str(value) for key, value in run_bindings.items()}
+    if set(expected_bindings) != RUN_BINDING_KEYS or any(
+        not SHA256_PATTERN.fullmatch(value) for value in expected_bindings.values()
+    ):
+        raise ValueError("expected Controlled run bindings are invalid")
+    if payload.get("run_bindings") != expected_bindings:
+        raise ValueError("materialized member run-binding fingerprint mismatch")
+    validate_checkpoint_binding_universe(members, checkpoint_bindings)
     raw_records = payload.get("members")
     if not isinstance(raw_records, list):
         raise ValueError("materialized member manifest members must be a list")
 
     expected = {member.member_id: member for member in members}
     artifacts: dict[str, MaterializedMemberArtifact] = {}
+    documents: dict[str, Mapping[str, Any]] = {}
     registered_outputs: set[str] = set()
     for raw_record in raw_records:
         if not isinstance(raw_record, Mapping):
@@ -404,14 +770,7 @@ def validate_materialized_member_bundle(
         document = json.loads(source.read_text(encoding="utf-8"))
         if not isinstance(document, Mapping):
             raise ValueError(f"materialized output is not an object: {member_id}")
-        identity = (
-            document.get("schema_version") == 1
-            and document.get("member_id") == member_id
-            and document.get("phase") == member.phase
-            and document.get("status") == "completed"
-        )
-        if not identity:
-            raise ValueError(f"materialized output identity mismatch: {member_id}")
+        documents[member_id] = document
         artifacts[member_id] = MaterializedMemberArtifact(
             member_id=member_id,
             output=output,
@@ -422,10 +781,19 @@ def validate_materialized_member_bundle(
     if set(artifacts) != set(expected):
         missing = sorted(set(expected) - set(artifacts))
         raise ValueError(f"materialized member coverage is incomplete: {missing[:5]}")
+    for member in members:
+        _validate_member_document(
+            documents[member.member_id],
+            member,
+            run_bindings=expected_bindings,
+            checkpoint_bindings=checkpoint_bindings,
+            dependency_artifacts=artifacts,
+        )
     return MaterializedMemberBundle(
         root=bundle_root,
         manifest=manifest_path,
         producer_execution_class=producer_execution_class,
+        run_bindings=expected_bindings,
         artifacts=artifacts,
     )
 
@@ -483,7 +851,12 @@ def _member_receipt_path(context: RunContext, member: PlanMember) -> Path:
     return context.path / "receipts" / "members" / f"{member.member_id}.json"
 
 
-def receipt_reusable(context: RunContext, member: PlanMember) -> bool:
+def receipt_reusable(
+    context: RunContext,
+    member: PlanMember,
+    *,
+    run_bindings: Mapping[str, str],
+) -> bool:
     """Return true only when a completed receipt still matches every artifact."""
 
     path = _member_receipt_path(context, member)
@@ -495,7 +868,15 @@ def receipt_reusable(context: RunContext, member: PlanMember) -> bool:
         return False
     if receipt.get("status") != "completed":
         return False
-    artifacts = receipt.get("details", {}).get("artifacts", [])
+    details = receipt.get("details", {})
+    if (
+        details.get("phase") != member.phase
+        or details.get("output") != member.output
+        or details.get("member_spec_sha256") != member_spec_sha256(member)
+        or details.get("run_bindings") != dict(run_bindings)
+    ):
+        return False
+    artifacts = details.get("artifacts", [])
     if not artifacts:
         return False
     for artifact in artifacts:
@@ -514,6 +895,8 @@ def execute_members(
     context: RunContext,
     members: Sequence[PlanMember],
     executor: MemberExecutor,
+    *,
+    run_bindings: Mapping[str, str],
 ) -> dict[str, Any]:
     """Execute members with atomic terminal receipts and receipt-driven resume."""
 
@@ -531,7 +914,7 @@ def execute_members(
             raise RuntimeError(
                 f"member {member.member_id} has incomplete dependencies: {unresolved}"
             )
-        if context.resume and receipt_reusable(context, member):
+        if context.resume and receipt_reusable(context, member, run_bindings=run_bindings):
             receipts[member.member_id] = load_member_receipt(receipt_path)
             completed += 1
             reused += 1
@@ -540,7 +923,12 @@ def execute_members(
             receipt_path,
             member.member_id,
             "running",
-            details={"phase": member.phase, "output": member.output},
+            details={
+                "phase": member.phase,
+                "output": member.output,
+                "member_spec_sha256": member_spec_sha256(member),
+                "run_bindings": dict(run_bindings),
+            },
         )
         try:
             artifacts = tuple(executor(context, member))
@@ -551,7 +939,13 @@ def execute_members(
                 receipt_path,
                 member.member_id,
                 "completed",
-                details={"phase": member.phase, "artifacts": records},
+                details={
+                    "phase": member.phase,
+                    "output": member.output,
+                    "member_spec_sha256": member_spec_sha256(member),
+                    "run_bindings": dict(run_bindings),
+                    "artifacts": records,
+                },
             )
             completed += 1
         except Exception as error:
@@ -559,7 +953,12 @@ def execute_members(
                 receipt_path,
                 member.member_id,
                 "failed",
-                details={"phase": member.phase},
+                details={
+                    "phase": member.phase,
+                    "output": member.output,
+                    "member_spec_sha256": member_spec_sha256(member),
+                    "run_bindings": dict(run_bindings),
+                },
                 error=f"{type(error).__name__}: {error}",
             )
             raise
@@ -570,7 +969,12 @@ def execute_members(
         context.path.name,
         receipts,
         expected_members=[member.member_id for member in members],
-        details={"completed": completed, "reused": reused},
+        details={
+            "completed": completed,
+            "reused": reused,
+            "member_contract_sha256": member_contract_sha256(members),
+            "run_bindings": dict(run_bindings),
+        },
     )
     return {"members": len(members), "completed": completed, "reused": reused}
 
@@ -641,15 +1045,21 @@ __all__ = [
     "MaterializedMemberBundle",
     "MemberExecutor",
     "PlanMember",
+    "RUN_BINDING_KEYS",
     "build_members",
+    "checkpoint_bindings_from_manifest",
     "configuration_sha256",
     "execute_members",
     "materialized_member_executor",
+    "member_checkpoint_contract",
     "member_contract_sha256",
+    "member_spec_sha256",
     "plan_counts",
+    "prepared_run_bindings",
     "receipt_reusable",
     "resolve_materialized_output_root",
     "smoke_executor",
+    "validate_checkpoint_binding_universe",
     "validate_materialized_member_bundle",
     "write_jobs_manifest",
 ]

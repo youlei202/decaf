@@ -38,7 +38,10 @@ IDs, validates every checkpoint byte, and checks that each producer points to
 the corresponding C1 or C2 training member. The 52 evidence snapshots come
 from eight trajectories, so C1 has 44 factory jobs rather than 88 independent
 training jobs. C0 remains strictly no-retraining and also verifies its frozen
-probability-cache hashes.
+probability-cache hashes. The inventory additionally pins one portable registry
+digest for each of C0, C1, and C2; these digests cover model identities,
+checkpoint hashes, cache hashes where applicable, and producer-member bindings
+without embedding host-specific paths.
 
 ## ImageNet-9 family
 

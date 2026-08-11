@@ -146,6 +146,17 @@ def test_c1_c2_checkpoint_bundles_verify_producers_and_bytes(tmp_path: Path) -> 
     c1_validated = validate_c1_checkpoint_bundle(c1_manifest, selected)
     assert len(c1_validated) == 3
     assert c1_validated.attrs["byte_identity_verified"] is True
+    validate_c1_checkpoint_bundle(
+        c1_manifest,
+        selected,
+        expected_registry_sha256=c1_validated.attrs["logical_registry_sha256"],
+    )
+    with pytest.raises(ValueError, match="registry SHA256 mismatch"):
+        validate_c1_checkpoint_bundle(
+            c1_manifest,
+            selected,
+            expected_registry_sha256="0" * 64,
+        )
 
     contradiction = config["contradiction"]
     c2_registry = expected_contradiction_models(
@@ -170,6 +181,11 @@ def test_c1_c2_checkpoint_bundles_verify_producers_and_bytes(tmp_path: Path) -> 
     c2_validated = validate_c2_checkpoint_bundle(c2_manifest, c2_registry)
     assert len(c2_validated) == 1
     assert c2_validated.attrs["byte_identity_verified"] is True
+    validate_c2_checkpoint_bundle(
+        c2_manifest,
+        c2_registry,
+        expected_registry_sha256=c2_validated.attrs["logical_registry_sha256"],
+    )
 
     (tmp_path / c1_rows[0]["checkpoint_path"]).write_bytes(b"tampered")
     with pytest.raises(ValueError, match="SHA256 mismatch"):

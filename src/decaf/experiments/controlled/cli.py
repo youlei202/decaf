@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from decaf.core.manifests import atomic_write_json, sha256_file
 from decaf.experiments.common import (
     RunContext,
@@ -31,11 +33,13 @@ from decaf.experiments.controlled.data import (
 )
 from decaf.experiments.controlled.evaluate import (
     build_members,
+    checkpoint_bindings_from_manifest,
     configuration_sha256,
     execute_members,
     materialized_member_executor,
     member_contract_sha256,
     plan_counts,
+    prepared_run_bindings,
     resolve_materialized_output_root,
     smoke_executor,
     validate_materialized_member_bundle,
@@ -94,7 +98,9 @@ def build_plan(config: Mapping[str, Any]) -> dict[str, Any]:
             "c0_no_retraining": True,
             "shared_noise_within_pairs": True,
             "accumulation_dtype": "float64",
-            "paper_compute_contract": "hash_registered_materialized_accelerator_outputs",
+            "paper_compute_contract": "hash_registered_materialized_accelerator_outputs_v2",
+            "prepared_input_lineage_bound": True,
+            "checkpoint_cache_universe_exact": True,
             "gpu_execution_performed_by_this_cli": False,
             "c1_checkpoint_producer_coverage": True,
             "c2_checkpoint_producer_coverage": True,
@@ -113,6 +119,30 @@ def _checkpoint_cache_root() -> Path:
     return Path(root).expanduser().resolve() / "checkpoints" / "controlled"
 
 
+def _checkpoint_inventory() -> tuple[Path, dict[str, Mapping[str, Any]]]:
+    path = repository_root() / "manifests" / "checkpoints" / "controlled.yaml"
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping) or payload.get("kind") != "checkpoint_inventory":
+        raise ValueError("Controlled checkpoint inventory has an unsupported schema")
+    raw_groups = payload.get("groups")
+    if not isinstance(raw_groups, list):
+        raise ValueError("Controlled checkpoint inventory groups must be a list")
+    groups = {
+        str(group["id"]): group
+        for group in raw_groups
+        if isinstance(group, Mapping) and "id" in group
+    }
+    expected = {"base_models", "selected_evidence_states", "context_swap"}
+    if set(groups) != expected:
+        raise ValueError("Controlled checkpoint inventory group coverage changed")
+    return path, groups
+
+
+def _manifest_asset_path(manifest: Path, value: Any) -> Path:
+    path = Path(str(value))
+    return path if path.is_absolute() else manifest.parent / path
+
+
 def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, Any]:
     """Validate C0/C1/C2 manifest identity, producer coverage, and local bytes."""
 
@@ -121,16 +151,30 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
     c0_manifest = cache / str(assets["c0_model_manifest"])
     c1_manifest = cache / str(assets["c1_model_manifest"])
     c2_manifest = cache / str(assets["c2_model_manifest"])
-    c0_rows = validate_c0_no_retraining_bundle(c0_manifest)
+    inventory_path, inventory = _checkpoint_inventory()
+    c0_rows = validate_c0_no_retraining_bundle(
+        c0_manifest,
+        expected_registry_sha256=str(inventory["base_models"]["portable_registry_sha256"]),
+    )
     selected = selected_c1_checkpoints(config["endpoint_behavior"])
-    c1_rows = validate_c1_checkpoint_bundle(c1_manifest, selected)
+    c1_rows = validate_c1_checkpoint_bundle(
+        c1_manifest,
+        selected,
+        expected_registry_sha256=str(
+            inventory["selected_evidence_states"]["portable_registry_sha256"]
+        ),
+    )
     contradiction = config["contradiction"]
     c2_registry = expected_contradiction_models(
         tuple(map(str, contradiction["tasks"])),
         tuple(map(str, contradiction["architectures"])),
         tuple(map(int, contradiction["seeds"])),
     )
-    c2_rows = validate_c2_checkpoint_bundle(c2_manifest, c2_registry)
+    c2_rows = validate_c2_checkpoint_bundle(
+        c2_manifest,
+        c2_registry,
+        expected_registry_sha256=str(inventory["context_swap"]["portable_registry_sha256"]),
+    )
     c1_jobs = c1_factory_training_jobs(config["endpoint_behavior"])
 
     return {
@@ -138,6 +182,10 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
         "root_environment": "DECAF_CACHE_ROOT",
         "verification": "local_byte_identity",
         "gpu_execution_verified_here": False,
+        "canonical_inventory": {
+            "path": "manifests/checkpoints/controlled.yaml",
+            "sha256": sha256_file(inventory_path),
+        },
         "items": [
             {
                 "id": "c0_base_models",
@@ -145,10 +193,14 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
                 "no_retraining": True,
                 "source_manifest": str(assets["c0_model_manifest"]),
                 "source_manifest_sha256": sha256_file(c0_manifest),
+                "portable_registry_sha256": c0_rows.attrs["logical_registry_sha256"],
                 "checkpoints": [
                     {
                         "model_id": str(row.model_id),
-                        "logical_path": f"checkpoints/c0/{Path(str(row.checkpoint_path)).name}",
+                        "logical_path": f"checkpoints/c0/{row.model_id}.pt",
+                        "bytes": _manifest_asset_path(
+                            c0_manifest, row.checkpoint_path
+                        ).stat().st_size,
                         "sha256": str(row.checkpoint_sha256),
                     }
                     for row in c0_rows.itertuples(index=False)
@@ -156,10 +208,10 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
                 "probability_caches": [
                     {
                         "model_id": str(row.model_id),
-                        "logical_path": (
-                            "probability_caches/c0/"
-                            f"{Path(str(row.probability_cache_path)).name}"
-                        ),
+                        "logical_path": f"probability_caches/c0/{row.model_id}.npy",
+                        "bytes": _manifest_asset_path(
+                            c0_manifest, row.probability_cache_path
+                        ).stat().st_size,
                         "sha256": str(row.probability_cache_sha256),
                     }
                     for row in c0_rows.itertuples(index=False)
@@ -172,10 +224,14 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
                 "producer_member_coverage": c1_rows["producer_member_id"].nunique(),
                 "source_manifest": str(assets["c1_model_manifest"]),
                 "source_manifest_sha256": sha256_file(c1_manifest),
+                "portable_registry_sha256": c1_rows.attrs["logical_registry_sha256"],
                 "checkpoints": [
                     {
                         "model_id": str(row.model_id),
-                        "logical_path": f"checkpoints/c1/{Path(str(row.checkpoint_path)).name}",
+                        "logical_path": f"checkpoints/c1/{row.model_id}.pt",
+                        "bytes": _manifest_asset_path(
+                            c1_manifest, row.checkpoint_path
+                        ).stat().st_size,
                         "sha256": str(row.checkpoint_sha256),
                         "producer_member_id": str(row.producer_member_id),
                     }
@@ -189,10 +245,14 @@ def _validate_paper_checkpoint_inputs(config: Mapping[str, Any]) -> dict[str, An
                 "producer_member_coverage": c2_rows["producer_member_id"].nunique(),
                 "source_manifest": str(assets["c2_model_manifest"]),
                 "source_manifest_sha256": sha256_file(c2_manifest),
+                "portable_registry_sha256": c2_rows.attrs["logical_registry_sha256"],
                 "checkpoints": [
                     {
                         "model_id": str(row.model_id),
-                        "logical_path": f"checkpoints/c2/{Path(str(row.checkpoint_path)).name}",
+                        "logical_path": f"checkpoints/c2/{row.model_id}.pt",
+                        "bytes": _manifest_asset_path(
+                            c2_manifest, row.checkpoint_path
+                        ).stat().st_size,
                         "sha256": str(row.checkpoint_sha256),
                         "producer_member_id": str(row.producer_member_id),
                     }
@@ -246,7 +306,13 @@ def compute_handler(context: RunContext) -> Mapping[str, Any]:
     members = build_members(context.config)
     profile = str(context.config.get("profile", context.profile))
     if profile == "smoke":
-        return execute_members(context, members, smoke_executor)
+        run_bindings = prepared_run_bindings(context, members)
+        return execute_members(
+            context,
+            members,
+            smoke_executor,
+            run_bindings=run_bindings,
+        )
 
     if not context.stage_completed("prepare"):
         raise RuntimeError(
@@ -260,6 +326,7 @@ def compute_handler(context: RunContext) -> Mapping[str, Any]:
     config_digest = configuration_sha256(context.config)
     if prepared_plan.get("configuration_sha256") != config_digest:
         raise ValueError("prepared Controlled configuration fingerprint mismatch")
+    run_bindings = prepared_run_bindings(context, members)
 
     execution = context.config.get("execution", {})
     if not isinstance(execution, Mapping):
@@ -268,23 +335,40 @@ def compute_handler(context: RunContext) -> Mapping[str, Any]:
     member_bundle = validate_materialized_member_bundle(
         source_root,
         members,
-        config_sha256=config_digest,
+        run_bindings=run_bindings,
+        checkpoint_bindings=checkpoint_bindings_from_manifest(
+            context.path / "manifests" / "checkpoints.json"
+        ),
         manifest_relative=str(execution.get("member_manifest", "manifests/members.json")),
     )
-    result = execute_members(context, members, materialized_member_executor(member_bundle))
+    result = execute_members(
+        context,
+        members,
+        materialized_member_executor(member_bundle),
+        run_bindings=run_bindings,
+    )
+    member_manifest_digest = sha256_file(member_bundle.manifest)
     analysis_receipts = materialize_controlled_analysis_outputs(
         source_root,
         context.path / "paper_data" / "reference",
+        run_bindings=run_bindings,
+        member_manifest_sha256=member_manifest_digest,
         manifest_relative=str(execution.get("analysis_manifest", "manifests/analysis.json")),
         analysis_prefix=str(execution.get("analysis_root", "analysis")),
     )
     atomic_write_json(
         context.path / "receipts" / "controlled_materialized_analysis_inputs.json",
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_kind": "materialized_accelerator_analysis",
             "byte_identity_verified": True,
             "gpu_execution_performed_here": False,
+            "run_bindings": run_bindings,
+            "member_manifest_sha256": member_manifest_digest,
+            "analysis_manifest_sha256": sha256_file(
+                source_root
+                / str(execution.get("analysis_manifest", "manifests/analysis.json"))
+            ),
             "items": analysis_receipts,
         },
     )
@@ -292,7 +376,7 @@ def compute_handler(context: RunContext) -> Mapping[str, Any]:
         **result,
         "source": "materialized_accelerator_outputs",
         "producer_declared_execution_class": member_bundle.producer_execution_class,
-        "member_manifest_sha256": sha256_file(member_bundle.manifest),
+        "member_manifest_sha256": member_manifest_digest,
         "analysis_inputs": len(analysis_receipts),
         "byte_identity_verified": True,
         "gpu_execution_performed_here": False,

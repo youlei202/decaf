@@ -356,6 +356,8 @@ def materialize_controlled_analysis_outputs(
     source_root: str | Path,
     destination: str | Path,
     *,
+    run_bindings: Mapping[str, str],
+    member_manifest_sha256: str,
     manifest_relative: str = "manifests/analysis.json",
     analysis_prefix: str = "analysis",
 ) -> list[dict[str, Any]]:
@@ -373,8 +375,14 @@ def materialize_controlled_analysis_outputs(
     manifest = read_json(manifest_path)
     if not isinstance(manifest, Mapping):
         raise ValueError("materialized analysis manifest must be an object")
-    if manifest.get("schema_version") != 1 or manifest.get("kind") != "controlled_analysis":
+    if manifest.get("schema_version") != 2 or manifest.get("kind") != "controlled_analysis":
         raise ValueError("materialized analysis manifest has an unsupported schema")
+    if manifest.get("producer_execution_class") != "accelerator":
+        raise ValueError("materialized analysis must declare the accelerator execution class")
+    if manifest.get("run_bindings") != dict(run_bindings):
+        raise ValueError("materialized analysis run-binding fingerprint mismatch")
+    if manifest.get("member_manifest_sha256") != member_manifest_sha256:
+        raise ValueError("materialized analysis member-manifest fingerprint mismatch")
     files = manifest.get("files")
     if not isinstance(files, list):
         raise ValueError("materialized analysis manifest files must be a list")

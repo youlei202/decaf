@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -22,6 +24,67 @@ SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 def _truthy(series: pd.Series) -> pd.Series:
     return series.astype(str).str.strip().str.lower().isin({"1", "true", "yes"})
+
+
+def _logical_registry_sha256(records: Sequence[Mapping[str, Any]]) -> str:
+    encoded = json.dumps(
+        sorted((dict(record) for record in records), key=lambda row: str(row["model_id"])),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def c0_checkpoint_registry_sha256(frame: pd.DataFrame) -> str:
+    """Hash portable C0 identities and checkpoint/cache bytes, excluding host paths."""
+
+    records = [
+        {
+            "model_id": str(row.model_id),
+            "task": str(row.task_name),
+            "architecture": str(row.architecture),
+            "seed": int(row.seed),
+            "checkpoint_sha256": str(row.checkpoint_sha256).lower(),
+            "probability_cache_sha256": str(row.probability_cache_sha256).lower(),
+        }
+        for row in frame.itertuples(index=False)
+    ]
+    return _logical_registry_sha256(records)
+
+
+def c1_checkpoint_registry_sha256(frame: pd.DataFrame) -> str:
+    """Hash portable C1 identities, producers, and selected checkpoint bytes."""
+
+    records = [
+        {
+            "model_id": str(row.model_id),
+            "module": str(row.module),
+            "variant": str(row.variant),
+            "architecture": str(row.architecture),
+            "seed": int(row.seed),
+            "checkpoint_sha256": str(row.checkpoint_sha256).lower(),
+            "producer_member_id": str(row.producer_member_id),
+        }
+        for row in frame.itertuples(index=False)
+    ]
+    return _logical_registry_sha256(records)
+
+
+def c2_checkpoint_registry_sha256(frame: pd.DataFrame) -> str:
+    """Hash portable C2 identities, producers, and checkpoint bytes."""
+
+    records = [
+        {
+            "model_id": str(row.model_id),
+            "task": str(row.task),
+            "architecture": str(row.architecture),
+            "seed": int(row.seed),
+            "checkpoint_sha256": str(row.checkpoint_sha256).lower(),
+            "producer_member_id": str(row.producer_member_id),
+        }
+        for row in frame.itertuples(index=False)
+    ]
+    return _logical_registry_sha256(records)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +168,19 @@ def validate_c0_manifest(frame: pd.DataFrame, *, expected_count: int = 30) -> pd
     rows = frame.copy()
     if len(rows) != int(expected_count) or rows["model_id"].nunique() != len(rows):
         raise ValueError(f"C0 manifest must contain {expected_count} unique base models")
+    registry = expected_base_models()
+    expected_by_id = {record.model_id: record for record in registry}
+    if int(expected_count) == len(registry):
+        if set(rows["model_id"].astype(str)) != set(expected_by_id):
+            raise ValueError("C0 manifest does not contain the registered base-model IDs")
+        for row in rows.itertuples(index=False):
+            expected = expected_by_id[str(row.model_id)]
+            if (
+                str(row.task_name) != expected.task
+                or str(row.architecture) != expected.architecture
+                or int(row.seed) != expected.seed
+            ):
+                raise ValueError(f"C0 model metadata mismatch: {row.model_id}")
     if not _truthy(rows["qualified"]).all() or not _truthy(rows["available"]).all():
         raise ValueError("C0 manifest contains an unavailable or unqualified frozen model")
     for column in ("checkpoint_sha256", "probability_cache_sha256"):
@@ -194,6 +270,17 @@ def validate_c2_model_grid(
         raise ValueError(
             f"C2 table does not contain the registered {int(expected_count)}-model grid"
         )
+    expected_by_id = {record.model_id: record for record in registry}
+    if set(rows["model_id"].astype(str)) != set(expected_by_id):
+        raise ValueError("C2 table does not contain the registered model IDs")
+    for row in rows.itertuples(index=False):
+        expected_record = expected_by_id[str(row.model_id)]
+        if (
+            str(row.task) != expected_record.task
+            or str(row.architecture) != expected_record.architecture
+            or int(row.seed) != expected_record.seed
+        ):
+            raise ValueError(f"C2 model metadata mismatch: {row.model_id}")
     return rows.sort_values("model_id", kind="mergesort").reset_index(drop=True)
 
 
@@ -224,6 +311,8 @@ def _manifest_checkpoint_path(manifest: Path, raw_path: Any) -> Path:
 def validate_c1_checkpoint_bundle(
     manifest_path: str | Path,
     expected_checkpoints: Sequence[Mapping[str, Any]],
+    *,
+    expected_registry_sha256: str | None = None,
 ) -> pd.DataFrame:
     """Validate exact C1 identities, producer jobs, and checkpoint bytes."""
 
@@ -264,13 +353,19 @@ def validate_c1_checkpoint_bundle(
             str(row.checkpoint_sha256),
             label=f"C1 {model_id_value} checkpoint",
         )
+    registry_digest = c1_checkpoint_registry_sha256(rows)
+    if expected_registry_sha256 is not None and registry_digest != expected_registry_sha256:
+        raise ValueError("C1 logical checkpoint registry SHA256 mismatch")
     rows.attrs["byte_identity_verified"] = True
+    rows.attrs["logical_registry_sha256"] = registry_digest
     return rows
 
 
 def validate_c2_checkpoint_bundle(
     manifest_path: str | Path,
     expected_records: Sequence[ModelRecord] | None = None,
+    *,
+    expected_registry_sha256: str | None = None,
 ) -> pd.DataFrame:
     """Validate the exact C2 grid, producer jobs, and checkpoint bytes."""
 
@@ -302,15 +397,27 @@ def validate_c2_checkpoint_bundle(
             str(row.checkpoint_sha256),
             label=f"C2 {model_id_value} checkpoint",
         )
+    registry_digest = c2_checkpoint_registry_sha256(rows)
+    if expected_registry_sha256 is not None and registry_digest != expected_registry_sha256:
+        raise ValueError("C2 logical checkpoint registry SHA256 mismatch")
     rows.attrs["byte_identity_verified"] = True
+    rows.attrs["logical_registry_sha256"] = registry_digest
     return rows
 
 
-def validate_c0_no_retraining_bundle(manifest_path: str | Path) -> pd.DataFrame:
+def validate_c0_no_retraining_bundle(
+    manifest_path: str | Path,
+    *,
+    expected_registry_sha256: str | None = None,
+) -> pd.DataFrame:
     """Validate all C0 checkpoint/cache bytes; never trains or rewrites them."""
 
     source = Path(manifest_path).resolve()
     rows = validate_c0_manifest(pd.read_csv(source))
+    if rows["checkpoint_path"].astype(str).duplicated().any():
+        raise ValueError("C0 checkpoint paths must be unique")
+    if rows["probability_cache_path"].astype(str).duplicated().any():
+        raise ValueError("C0 probability-cache paths must be unique")
     for row in rows.itertuples(index=False):
         for label, raw_path, digest in (
             ("checkpoint", row.checkpoint_path, row.checkpoint_sha256),
@@ -320,6 +427,11 @@ def validate_c0_no_retraining_bundle(manifest_path: str | Path) -> pd.DataFrame:
             if not path.is_absolute():
                 path = source.parent / path
             verify_checkpoint_file(path, str(digest), label=f"C0 {row.model_id} {label}")
+    registry_digest = c0_checkpoint_registry_sha256(rows)
+    if expected_registry_sha256 is not None and registry_digest != expected_registry_sha256:
+        raise ValueError("C0 logical checkpoint/cache registry SHA256 mismatch")
+    rows.attrs["byte_identity_verified"] = True
+    rows.attrs["logical_registry_sha256"] = registry_digest
     return rows
 
 
@@ -330,6 +442,9 @@ __all__ = [
     "CONTRADICTION_SEEDS",
     "CONTRADICTION_TASKS",
     "ModelRecord",
+    "c0_checkpoint_registry_sha256",
+    "c1_checkpoint_registry_sha256",
+    "c2_checkpoint_registry_sha256",
     "expected_base_models",
     "expected_contradiction_models",
     "model_id",

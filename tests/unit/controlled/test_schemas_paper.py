@@ -8,11 +8,17 @@ import pytest
 
 from decaf.experiments.controlled.analyze import (
     SCHEMAS,
+    ControlledReferenceBundle,
     TableSchema,
     assert_headline_targets,
     validate_frame,
 )
-from decaf.experiments.controlled.paper import PANEL_COLUMNS, panel_frame, write_smoke_paper_data
+from decaf.experiments.controlled.paper import (
+    PANEL_COLUMNS,
+    _module_f_bootstrap,
+    panel_frame,
+    write_smoke_paper_data,
+)
 
 
 def test_frozen_schema_cardinalities_are_registered() -> None:
@@ -85,3 +91,45 @@ def test_panel_data_has_portable_identity_and_provenance(tmp_path: Path) -> None
     assert result["artifacts"] == 1
     receipt = json.loads((tmp_path / "paper" / "controlled_receipt.json").read_text())
     assert receipt["gpu_real_shard_verification"] == "pending"
+
+
+def test_module_f_bootstrap_uses_only_the_endpoint_null_factor(tmp_path: Path) -> None:
+    source = tmp_path / "per_sample_bootstrap.parquet"
+    floor_values = (
+        0.6078392242306401,
+        0.48760556160305396,
+        0.6754459869087547,
+    )
+    rows = []
+    for seed, floor_value in zip((5301, 5302, 5303), floor_values, strict=True):
+        model_id = f"f__fragile__small_vit__seed_{seed}"
+        rows.extend(
+            (
+                {
+                    "model_id": model_id,
+                    "module": "F",
+                    "variant": "fragile",
+                    "architecture": "small_vit",
+                    "factor": "floor_color",
+                    "primary_geometry": 1.0,
+                    "F": floor_value,
+                },
+                {
+                    "model_id": model_id,
+                    "module": "F",
+                    "variant": "fragile",
+                    "architecture": "small_vit",
+                    "factor": "object_shape",
+                    "primary_geometry": 1.0,
+                    "F": 0.0,
+                },
+            )
+        )
+    frame = pd.DataFrame(rows)
+    frame.to_parquet(source, index=False)
+    bundle = ControlledReferenceBundle({"c1_bootstrap": frame}, {"c1_bootstrap": source})
+
+    result = _module_f_bootstrap(bundle)
+
+    assert len(result) == 1
+    assert result.iloc[0]["estimate"] == pytest.approx(0.5902969242474829, abs=1e-15)

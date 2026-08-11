@@ -96,7 +96,9 @@ def _module_f_bootstrap(bundle: ControlledReferenceBundle) -> pd.DataFrame:
         {"true", "yes"}
     )
     primary = samples.loc[
-        samples["module"].eq("F") & primary_geometry
+        samples["module"].eq("F")
+        & primary_geometry
+        & samples["factor"].eq("floor_color")
     ]
     per_model = primary.groupby(["variant", "architecture", "model_id"], as_index=False, sort=True)[
         "F"

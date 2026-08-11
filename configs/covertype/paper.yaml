@@ -1,0 +1,78 @@
+experiment: covertype
+schema_version: 1
+description: Full preregistered binary Covertype paper protocol.
+max_workers: 24
+
+data:
+  source: sklearn_covtype
+  download_if_missing: true
+  allow_fixture_fallback: false
+  max_total_samples: 240000
+  split_seed: 7601
+  fixture:
+    samples: 900
+    features: 54
+    informative: 18
+    redundant: 6
+    class_sep: 1.1
+    flip_y: 0.02
+    seed: 7601
+
+protocol:
+  model_families:
+    [logistic_regression, random_forest, hist_gradient_boosting, xgboost, mlp]
+  seeds: [7701, 7702, 7703]
+  module_c:
+    strengths: [0.75, 0.95]
+    mechanisms: [direct, gate, invert]
+  module_f:
+    regimes: [robust, mild, fragile]
+
+decaf:
+  stages: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  epsilon: 0.02
+  legal_binary_queries_only: true
+
+behavior:
+  direction_delta: 0.02
+
+evaluation:
+  max_rows: 48000
+
+analysis:
+  bootstrap_repetitions: 500
+  bootstrap_seed: 7601
+
+models:
+  logistic_regression:
+    penalty: l2
+    C: 1.0
+    max_iter: 1000
+    solver: lbfgs
+  random_forest:
+    n_estimators: 300
+    min_samples_leaf: 2
+    max_features: sqrt
+  hist_gradient_boosting:
+    max_iter: 250
+    learning_rate: 0.06
+    max_leaf_nodes: 31
+    l2_regularization: 0.001
+  xgboost:
+    n_estimators: 400
+    max_depth: 6
+    learning_rate: 0.05
+    subsample: 0.9
+    colsample_bytree: 0.9
+    reg_lambda: 1.0
+    tree_method: hist
+  mlp:
+    hidden_layer_sizes: [128, 64]
+    activation: relu
+    solver: adam
+    learning_rate_init: 0.001
+    alpha: 0.0001
+    batch_size: 512
+    max_iter: 60
+    early_stopping: true
+    n_iter_no_change: 8

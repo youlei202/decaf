@@ -1,0 +1,71 @@
+experiment: covertype
+schema_version: 1
+description: >-
+  Small CPU integration using a deterministic 54-feature synthetic
+  Covertype-shaped fixture. Every model is genuinely trained and evaluated,
+  but the fixture is never valid for paper results.
+max_workers: 2
+
+data:
+  source: synthetic_fixture
+  download_if_missing: false
+  allow_fixture_fallback: true
+  max_total_samples: 4000
+  split_seed: 7601
+  fixture:
+    samples: 4000
+    features: 54
+    informative: 18
+    redundant: 6
+    class_sep: 0.5
+    flip_y: 0.04
+    seed: 7601
+
+protocol:
+  model_families: [hist_gradient_boosting]
+  seeds: [7701]
+  module_c:
+    strengths: [0.95]
+    mechanisms: [direct, invert]
+  module_f:
+    regimes: [robust, fragile]
+
+decaf:
+  stages: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  epsilon: 0.02
+  legal_binary_queries_only: true
+
+behavior:
+  direction_delta: 0.02
+
+evaluation:
+  max_rows: 800
+
+analysis:
+  bootstrap_repetitions: 100
+  bootstrap_seed: 7601
+
+models:
+  logistic_regression:
+    penalty: l2
+    C: 1.0
+    max_iter: 300
+    solver: lbfgs
+  random_forest:
+    n_estimators: 60
+    max_depth: 10
+    min_samples_leaf: 3
+    max_features: sqrt
+  hist_gradient_boosting:
+    max_iter: 80
+    learning_rate: 0.08
+    max_leaf_nodes: 31
+  xgboost:
+    n_estimators: 50
+    max_depth: 4
+    learning_rate: 0.08
+    tree_method: hist
+  mlp:
+    hidden_layer_sizes: [32, 16]
+    max_iter: 40
+    early_stopping: false

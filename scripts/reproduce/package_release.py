@@ -1129,6 +1129,7 @@ def _git_info(repository: Path) -> dict[str, Any]:
 
 
 def _archive_repository(repository: Path, destination: Path, commit: str) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
     archive = destination.parent / "repository.tar"
     subprocess.run(
         ["git", "archive", "--format=tar", "--output", str(archive), commit],

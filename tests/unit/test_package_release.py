@@ -702,7 +702,7 @@ def test_repository_archive_uses_captured_commit_not_symbolic_head(
         "later",
     )
 
-    destination = tmp_path / "archive"
+    destination = tmp_path / "nested" / "archive"
     _archive_repository(repository, destination, captured)
 
     assert (destination / "value.txt").read_text(encoding="utf-8") == "captured\n"

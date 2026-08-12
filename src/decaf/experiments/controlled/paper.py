@@ -439,14 +439,20 @@ def write_reference_paper_data(
 
 
 def write_smoke_paper_data(metrics_path: str | Path, destination: str | Path) -> dict[str, Any]:
-    """Write one honest CPU-oracle panel for smoke plumbing verification."""
+    """Write an honest CPU-oracle or explicitly verified CUDA smoke panel."""
 
     source = Path(metrics_path)
     frame = pd.read_csv(source)
+    real_cuda = bool(
+        "gpu_verification" in frame
+        and len(frame) > 0
+        and frame["gpu_verification"].astype(str).eq("passed").all()
+    )
+    scope = "real_cuda_single_b200_shard" if real_cuda else "cpu_score_oracle"
     panel = panel_frame(
         frame,
         artifact_id="controlled_smoke",
-        panel_id="score_oracle",
+        panel_id="real_cuda_shard" if real_cuda else "score_oracle",
         source=source,
         series="metric",
         x="model_id",
@@ -458,8 +464,8 @@ def write_smoke_paper_data(metrics_path: str | Path, destination: str | Path) ->
     receipt = {
         "schema_version": 1,
         "family": "controlled",
-        "scope": "cpu_score_oracle",
-        "gpu_real_shard_verification": "pending",
+        "scope": scope,
+        "gpu_real_shard_verification": "passed" if real_cuda else "pending",
         "artifacts": [
             {
                 "path": artifact.name,
@@ -469,7 +475,7 @@ def write_smoke_paper_data(metrics_path: str | Path, destination: str | Path) ->
         ],
     }
     atomic_write_json(output / "controlled_receipt.json", receipt)
-    return {"artifacts": 1, "scope": "cpu_score_oracle"}
+    return {"artifacts": 1, "scope": scope}
 
 
 __all__ = [

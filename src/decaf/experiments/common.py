@@ -6,13 +6,14 @@ import argparse
 import json
 import os
 import platform
+import signal
 import shutil
 import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,10 +29,29 @@ TERMINAL_STATUSES = (
 StageHandler = Callable[["RunContext"], Mapping[str, Any] | None]
 
 
+class TerminationRequested(RuntimeError):
+    """Raised when the process receives a normal termination request."""
+
+
+def parse_devices(value: str) -> tuple[int, ...]:
+    """Parse a comma-separated, duplicate-free CUDA device list."""
+
+    raw = tuple(part.strip() for part in value.split(","))
+    if not raw or any(not part for part in raw):
+        raise argparse.ArgumentTypeError("devices must be a comma-separated list of integers")
+    try:
+        devices = tuple(int(part) for part in raw)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("devices must be a comma-separated list of integers") from error
+    if any(device < 0 for device in devices) or len(devices) != len(set(devices)):
+        raise argparse.ArgumentTypeError("devices must contain unique non-negative integers")
+    return devices
+
+
 def utc_now() -> str:
     """Return a stable UTC timestamp."""
 
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def repository_root() -> Path:
@@ -151,6 +171,11 @@ def make_parser(
     parser.add_argument("--config", type=Path)
     parser.add_argument("--run-id")
     parser.add_argument("--max-workers", type=int)
+    parser.add_argument(
+        "--devices",
+        type=parse_devices,
+        help="Comma-separated physical CUDA device IDs; single-B200 verification uses 0",
+    )
     return parser
 
 
@@ -165,7 +190,7 @@ def default_output(experiment: str, run_id: str) -> Path:
 def make_run_id(experiment: str, profile: str) -> str:
     """Create a sortable run identifier."""
 
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{experiment}-{profile}-{stamp}"
 
 
@@ -330,6 +355,13 @@ def execute_run(
     """Execute stages with resumable, terminal-state-safe receipts."""
 
     completed: list[str] = []
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def request_termination(signum: int, _frame: Any) -> None:
+        signal.signal(signum, signal.SIG_IGN)
+        raise TerminationRequested(f"received signal {signum}")
+
+    signal.signal(signal.SIGTERM, request_termination)
     try:
         for stage in requested_stages(context.stage):
             if context.resume and context.stage_completed(stage):
@@ -365,6 +397,8 @@ def execute_run(
             error=f"{type(error).__name__}: {error}",
         )
         raise
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 def write_plan(plan: Mapping[str, Any], destination: Path | None = None) -> None:
@@ -396,6 +430,16 @@ def run_cli(
     """Run a family CLI after uniform planning and lifecycle setup."""
 
     config = load_profile(experiment, args.profile, args.config)
+    if args.devices is not None:
+        device_text = ",".join(str(device) for device in args.devices)
+        configured = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if configured not in {None, "", device_text}:
+            raise ValueError(
+                "--devices conflicts with the existing CUDA_VISIBLE_DEVICES setting: "
+                f"{device_text!r} != {configured!r}"
+            )
+        os.environ["CUDA_VISIBLE_DEVICES"] = device_text
+        os.environ["DECAF_DEVICES"] = device_text
     if args.plan_only:
         write_plan(plan, args.output)
         return 0
@@ -418,6 +462,7 @@ def run_cli(
 __all__ = [
     "RunContext",
     "StageHandler",
+    "TerminationRequested",
     "atomic_json",
     "atomic_text",
     "available_cpu_count",
@@ -426,6 +471,7 @@ __all__ = [
     "execute_run",
     "load_profile",
     "make_parser",
+    "parse_devices",
     "repository_root",
     "requested_stages",
     "run_cli",

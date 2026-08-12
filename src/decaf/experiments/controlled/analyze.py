@@ -636,36 +636,61 @@ def analyze_reference_bundle(
 
 
 def analyze_smoke(raw_root: str | Path, output: str | Path) -> dict[str, Any]:
-    """Aggregate tiny score-oracle JSON outputs without paper-scale claims."""
+    """Aggregate the CPU oracle or the explicitly gated real-CUDA shard."""
 
-    rows: list[dict[str, Any]] = []
+    documents: list[Mapping[str, Any]] = []
     for path in sorted(Path(raw_root).rglob("*.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("metrics"):
+            documents.append(payload)
+    real_cuda = bool(documents) and {
+        str(payload.get("kind", "unknown")) for payload in documents
+    } == {"controlled_real_cuda_shard"}
+    rows: list[dict[str, Any]] = []
+    for payload in documents:
         metrics = payload.get("metrics", {})
         for metric, value in metrics.items():
             array = np.asarray(value, dtype=np.float64)
-            rows.append(
-                {
-                    "experiment": "controlled",
-                    "model_id": payload.get("model_id", "unknown"),
-                    "metric": metric,
-                    "value": float(np.mean(array)),
-                    "n_values": int(array.size),
-                    "gpu_verification": "pending",
-                }
-            )
+            row = {
+                "experiment": "controlled",
+                "model_id": payload.get("model_id", "unknown"),
+                "metric": metric,
+                "value": float(np.mean(array)),
+                "n_values": int(array.size),
+                "gpu_verification": "passed" if real_cuda else "pending",
+            }
+            if real_cuda:
+                row.update(
+                    {
+                        "architecture": payload.get("architecture", "score_oracle"),
+                        "family": payload.get("family", "score_oracle"),
+                        "case_id": payload.get("case_id", "score_oracle"),
+                        "expected_behavior": payload.get("expected_behavior", "score_oracle"),
+                    }
+                )
+            rows.append(row)
     if not rows:
         raise ValueError("controlled smoke analysis found no score-oracle outputs")
     destination = Path(output)
     destination.mkdir(parents=True, exist_ok=True)
-    _atomic_csv(pd.DataFrame(rows), destination / "controlled_smoke_metrics.csv")
-    summary = {
-        "schema_version": 1,
-        "status": "completed",
-        "rows": len(rows),
-        "scope": "cpu_score_oracle",
-        "gpu_real_shard_verification": "pending",
-    }
+    metrics_path = _atomic_csv(pd.DataFrame(rows), destination / "controlled_smoke_metrics.csv")
+    if real_cuda:
+        summary = {
+            "schema_version": 1,
+            "status": "completed",
+            "rows": len(rows),
+            "scope": "real_cuda_single_b200_shard",
+            "gpu_real_shard_verification": "passed",
+            "metrics_sha256": sha256_file(metrics_path),
+        }
+    else:
+        summary = {
+            "schema_version": 1,
+            "status": "completed",
+            "rows": len(rows),
+            "scope": "cpu_score_oracle",
+            "gpu_real_shard_verification": "pending",
+        }
     atomic_write_json(destination / "controlled_smoke_summary.json", summary)
     return summary
 

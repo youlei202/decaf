@@ -45,6 +45,19 @@ from decaf.experiments.controlled.evaluate import (
     validate_materialized_member_bundle,
     write_jobs_manifest,
 )
+from decaf.experiments.controlled.gpu_runtime import (
+    b200_enabled,
+    b200_member_executor,
+    b200_prepared_manifests,
+    build_b200_members,
+    build_b200_plan,
+    load_b200_assets,
+    load_b200_inventory,
+    validate_b200_analyze_resume,
+    validate_b200_compute_resume,
+    validate_b200_paper_resume,
+    validate_b200_prepare_resume,
+)
 from decaf.experiments.controlled.models import (
     expected_contradiction_models,
     validate_c0_no_retraining_bundle,
@@ -66,6 +79,8 @@ EXPERIMENT = "controlled"
 def build_plan(config: Mapping[str, Any]) -> dict[str, Any]:
     """Build and audit the complete static controlled schedule."""
 
+    if b200_enabled():
+        return build_b200_plan(config)
     members = build_members(config)
     counts = plan_counts(config, members)
     expected = {str(key): int(value) for key, value in config.get("expected_plan", {}).items()}
@@ -110,6 +125,12 @@ def build_plan(config: Mapping[str, Any]) -> dict[str, Any]:
         },
         "members": [member.as_dict() for member in members],
     }
+
+
+def _active_members(config: Mapping[str, Any]):
+    """Select real-CUDA members only behind the explicit B200 gate."""
+
+    return build_b200_members(config) if b200_enabled() else build_members(config)
 
 
 def _checkpoint_cache_root() -> Path:
@@ -267,12 +288,12 @@ def prepare_handler(context: RunContext) -> Mapping[str, Any]:
     """Validate public assets and persist the deterministic schedule."""
 
     plan = build_plan(context.config)
-    write_jobs_manifest(
-        context.path / "manifests" / "jobs.jsonl",
-        build_members(context.config),
-    )
+    members = _active_members(context.config)
+    write_jobs_manifest(context.path / "manifests" / "jobs.jsonl", members)
     profile = str(context.config.get("profile", context.profile))
-    if profile == "smoke":
+    if profile == "smoke" and b200_enabled():
+        data_manifest, checkpoint_manifest = b200_prepared_manifests()
+    elif profile == "smoke":
         data_manifest = {
             "schema_version": 1,
             "items": [
@@ -303,8 +324,25 @@ def prepare_handler(context: RunContext) -> Mapping[str, Any]:
 def compute_handler(context: RunContext) -> Mapping[str, Any]:
     """Run the CPU oracle or ingest a complete hash-registered GPU bundle."""
 
-    members = build_members(context.config)
+    members = _active_members(context.config)
     profile = str(context.config.get("profile", context.profile))
+    if profile == "smoke" and b200_enabled():
+        inventory = load_b200_inventory()
+        assets = load_b200_assets()
+        run_bindings = prepared_run_bindings(context, members)
+        result = execute_members(
+            context,
+            members,
+            b200_member_executor(inventory, assets),
+            run_bindings=run_bindings,
+        )
+        return {
+            **result,
+            "source": "historical_checkpoints_real_cuda",
+            "gpu_execution_performed_here": True,
+            "device": "cuda:0",
+            "precision": "float32",
+        }
     if profile == "smoke":
         run_bindings = prepared_run_bindings(context, members)
         return execute_members(
@@ -453,7 +491,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             "analyze": analyze_handler,
             "paper": paper_handler,
         },
+        resume_validators={
+            "prepare": _prepare_resume_validator,
+            "compute": _compute_resume_validator,
+            "analyze": _analyze_resume_validator,
+            "paper": _paper_resume_validator,
+        },
     )
+
+
+def _prepare_resume_validator(context: RunContext) -> Mapping[str, Any]:
+    return validate_b200_prepare_resume(context) if b200_enabled() else {}
+
+
+def _compute_resume_validator(context: RunContext) -> Mapping[str, Any]:
+    return validate_b200_compute_resume(context) if b200_enabled() else {}
+
+
+def _analyze_resume_validator(context: RunContext) -> Mapping[str, Any]:
+    return validate_b200_analyze_resume(context) if b200_enabled() else {}
+
+
+def _paper_resume_validator(context: RunContext) -> Mapping[str, Any]:
+    return validate_b200_paper_resume(context) if b200_enabled() else {}
 
 
 if __name__ == "__main__":

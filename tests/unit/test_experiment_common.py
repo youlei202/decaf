@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 from pathlib import Path
+
+import pytest
 
 from decaf.experiments.common import (
     RunContext,
+    TerminationRequested,
     atomic_json,
     bounded_workers,
     execute_run,
+    parse_devices,
     requested_stages,
 )
 
@@ -73,3 +79,24 @@ def test_failed_handler_never_leaves_running_receipt(tmp_path: Path) -> None:
 
 def test_cpu_worker_count_is_bounded() -> None:
     assert 1 <= bounded_workers(10_000) <= 32
+
+
+def test_device_parser_rejects_duplicates_and_negative_ids() -> None:
+    assert parse_devices("0") == (0,)
+    assert parse_devices("0, 2") == (0, 2)
+    with pytest.raises(Exception, match="unique non-negative"):
+        parse_devices("0,0")
+    with pytest.raises(Exception, match="unique non-negative"):
+        parse_devices("-1")
+
+
+def test_sigterm_terminalizes_global_and_stage_receipts(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+
+    def terminate(_context: RunContext) -> None:
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    with pytest.raises(TerminationRequested, match="signal"):
+        execute_run(context, {"prepare": terminate})
+    assert json.loads(context.run_receipt_path.read_text())["status"] == "failed"
+    assert json.loads(context.stage_receipt("prepare").read_text())["status"] == "failed"

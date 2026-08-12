@@ -739,6 +739,12 @@ def _fingerprints(root: Path) -> None:
                 "logits": [[0.0] * width],
                 "probabilities": [[1.0 / width] * width],
                 "imagenet9_probabilities": [[1.0 / 9] * 9],
+                "probability_adapter": {
+                    "direct_nine_way": kind != "off_the_shelf",
+                    "mapped_mass_renormalized": False,
+                    "official_mapping_sha256": "e" * 64,
+                    "softmax_count": 1,
+                },
                 "precision": "float32",
                 "device": "cuda:0",
                 "device_name": "NVIDIA B200",
@@ -1252,6 +1258,16 @@ def test_gpu_queue_requires_one_ordered_terminal_path_per_member() -> None:
     )
     with pytest.raises(module.FinalizationError, match="must not have a start"):
         module._validate_gpu_queue(resumed_with_start, "test")
+
+
+def test_nonrenormalized_imagenet9_probability_mass_is_validated() -> None:
+    module = _module()
+    observed = module._validate_subprobabilities(
+        [[0.1, 0.2, 0.3]], "mapped ImageNet-9 probabilities"
+    )
+    assert observed == [[0.1, 0.2, 0.3]]
+    with pytest.raises(module.FinalizationError, match="sub-probability"):
+        module._validate_subprobabilities([[0.5, 0.6]], "mapped ImageNet-9 probabilities")
 
 
 def test_finalizer_rejects_tampered_analysis_before_writing(

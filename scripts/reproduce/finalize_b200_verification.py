@@ -393,6 +393,21 @@ def _validate_probabilities(value: object, label: str) -> list[list[float]]:
     return probabilities
 
 
+def _validate_subprobabilities(value: object, label: str) -> list[list[float]]:
+    """Validate a non-renormalized probability projection with mass at most one."""
+
+    probabilities = _numeric_matrix(value, label)
+    for row in probabilities:
+        total = sum(row)
+        if (
+            any(number < 0.0 or number > 1.0 for number in row)
+            or total <= 0.0
+            or total > 1.0 + 1.0e-6
+        ):
+            raise FinalizationError(f"{label} is not a valid sub-probability mass")
+    return probabilities
+
+
 def _utc_timestamp(value: object, label: str) -> datetime:
     if not isinstance(value, str) or not value.endswith("Z"):
         raise FinalizationError(f"{label} is not a UTC timestamp")
@@ -1277,16 +1292,30 @@ def _validate_fingerprint_case(record: Mapping[str, Any]) -> tuple[Any, ...]:
             record.get("model_kind"),
             record.get("architecture_family"),
         )
-        mapped = _validate_probabilities(
-            record.get("imagenet9_probabilities"), f"{case_id} ImageNet-9 probabilities"
+        off_the_shelf = record.get("model_kind") == "off_the_shelf"
+        mapped = (
+            _validate_subprobabilities(
+                record.get("imagenet9_probabilities"),
+                f"{case_id} ImageNet-9 probabilities",
+            )
+            if off_the_shelf
+            else _validate_probabilities(
+                record.get("imagenet9_probabilities"),
+                f"{case_id} ImageNet-9 probabilities",
+            )
         )
-        expected_width = 1_000 if record.get("model_kind") == "off_the_shelf" else 9
+        adapter = _require_mapping(record.get("probability_adapter"), "probability adapter")
+        expected_width = 1_000 if off_the_shelf else 9
         if (
             identity not in REQUIRED_IMAGENET9_FINGERPRINTS
             or record.get("precision") != "float32"
             or output_width != expected_width
             or len(mapped) != len(sample_ids)
             or any(len(row) != 9 for row in mapped)
+            or adapter.get("direct_nine_way") is not (not off_the_shelf)
+            or adapter.get("mapped_mass_renormalized") is not False
+            or adapter.get("softmax_count") != 1
+            or not _is_sha256(adapter.get("official_mapping_sha256"))
         ):
             raise FinalizationError(f"ImageNet-9 fingerprint contract differs: {case_id}")
         return identity

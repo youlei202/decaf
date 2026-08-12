@@ -464,8 +464,19 @@ def _record_resume_validation(
     ) or _resume_artifact_inventory(context)
     encoded_inventory = json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode("utf-8")
     validation_details = dict(details or {})
-    raw_member_count = validation_details.get("member_count", 0)
-    member_count = int(raw_member_count) if raw_member_count is not None else 0
+    count_values = {
+        int(validation_details[key])
+        for key in (
+            "member_count",
+            "validated_members",
+            "completed_members",
+            "configured_members",
+        )
+        if key in validation_details and validation_details[key] is not None
+    }
+    if len(count_values) > 1:
+        raise ValueError("resume validator returned contradictory member counts")
+    member_count = count_values.pop() if count_values else 0
     if member_count < 0:
         raise ValueError("resume validator returned a negative member count")
     atomic_json(

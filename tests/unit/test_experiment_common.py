@@ -102,6 +102,32 @@ def test_resume_validator_writes_independent_hash_bound_receipt(tmp_path: Path) 
     assert len(receipt["artifact_inventory_sha256"]) == 64
 
 
+def test_resume_receipt_accepts_validated_members_count(tmp_path: Path) -> None:
+    context = RunContext.create(
+        experiment="example",
+        profile="smoke",
+        stage="compute",
+        output=tmp_path / "run",
+        config={"experiment": "example"},
+        workers=1,
+        resume=False,
+    )
+    assert execute_run(context, {"compute": lambda _context: {}}) == 0
+    resumed = RunContext.create(
+        experiment="example",
+        profile="smoke",
+        stage="compute",
+        output=context.path,
+        config={"experiment": "example"},
+        workers=1,
+        resume=True,
+    )
+    validators = {"compute": lambda _context: {"validated_members": 2}}
+    assert execute_run(resumed, {"compute": lambda _context: {}}, validators) == 0
+    receipt = json.loads((context.path / "receipts/resume/compute.json").read_text())
+    assert receipt["member_count"] == receipt["resumed_members"] == 2
+
+
 def test_failed_handler_never_leaves_running_receipt(tmp_path: Path) -> None:
     context = _context(tmp_path)
 

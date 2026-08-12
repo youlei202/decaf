@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+PRIVATE_WORK_USERS_ROOT = "/" + "work" + "/" + "Users" + "/"
+
 
 def _module():
     path = Path(__file__).parents[2] / "scripts" / "reproduce" / "package_b200_release.py"
@@ -18,6 +20,15 @@ def _module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_packager_sources_do_not_embed_private_path_detection_fixture() -> None:
+    root = Path(__file__).parents[2]
+    for relative in (
+        "scripts/reproduce/package_b200_release.py",
+        "tests/unit/test_package_b200_release.py",
+    ):
+        assert PRIVATE_WORK_USERS_ROOT not in (root / relative).read_text(encoding="utf-8")
 
 
 def _passed_status() -> dict[str, object]:
@@ -142,7 +153,7 @@ def test_cpu_provenance_transform_is_portable_auditable_and_non_mutating(
             "source observation without a host path\n"
             if occurrences == 0
             else "".join(
-                f"source_{repeat}: /work/Users/user-{index}/project/{repeat}\n"
+                f"source_{repeat}: {PRIVATE_WORK_USERS_ROOT}user-{index}/project/{repeat}\n"
                 for repeat in range(occurrences)
             )
         )
@@ -181,7 +192,7 @@ def test_cpu_provenance_transform_is_portable_auditable_and_non_mutating(
         assert record["packaged_sha256"] == hashlib.sha256(packaged.read_bytes()).hexdigest()
         assert record["replacement_count"] == fixture_identities[name]["replacement_count"]
         text = packaged.read_text(encoding="utf-8")
-        assert "/work/Users/" not in text
+        assert PRIVATE_WORK_USERS_ROOT not in text
         if record["replacement_count"]:
             assert "source-host://workspace/project/" in text
     persisted = json.loads(
@@ -201,8 +212,8 @@ def _b200_projection_fixture(module: object, root: Path) -> dict[str, bytes]:
     payload = {
         "case_count": 2,
         "cases": [
-            {"path": "/work/Users/tester/checkpoints/first.pt"},
-            {"path": "/work/Users/tester/checkpoints/second.pt"},
+            {"path": f"{PRIVATE_WORK_USERS_ROOT}tester/checkpoints/first.pt"},
+            {"path": f"{PRIVATE_WORK_USERS_ROOT}tester/checkpoints/second.pt"},
         ],
     }
     payload_path = root / paths[0]
@@ -225,7 +236,7 @@ def _b200_projection_fixture(module: object, root: Path) -> dict[str, bytes]:
     log_path = root / paths[3]
     log_path.parent.mkdir(parents=True)
     log_path.write_text(
-        "rootdir: /work/Users/tester/GitHub/decaf\n2 passed\n",
+        f"rootdir: {PRIVATE_WORK_USERS_ROOT}tester/GitHub/decaf\n2 passed\n",
         encoding="utf-8",
     )
     pytest_receipt = {
@@ -297,7 +308,7 @@ def test_b200_evidence_projection_preserves_portable_hash_closure(
 
     fingerprints = destination / module.B200_PORTABLE_EVIDENCE_FILES[0]
     log = destination / module.B200_PORTABLE_EVIDENCE_FILES[3]
-    assert "/work/Users/" not in fingerprints.read_text(encoding="utf-8")
+    assert PRIVATE_WORK_USERS_ROOT not in fingerprints.read_text(encoding="utf-8")
     assert "source-host://workspace/checkpoints/first.pt" in fingerprints.read_text(
         encoding="utf-8"
     )

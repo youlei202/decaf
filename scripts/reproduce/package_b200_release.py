@@ -106,7 +106,8 @@ PRIVATE_FRAGMENTS = (
     "/" + "tmp" + "/",
     "C:" + "\\" + "Users" + "\\",
 )
-WORK_USERS_PREFIX = re.compile(r"/work/Users/[A-Za-z0-9._-]+/")
+WORK_USERS_ROOT = "/" + "work" + "/" + "Users" + "/"
+WORK_USERS_PREFIX = re.compile(re.escape(WORK_USERS_ROOT) + r"[A-Za-z0-9._-]+/")
 PORTABLE_WORKSPACE_PREFIX = "source-host://workspace/"
 B200_PORTABLE_EVIDENCE_FILES = (
     "verification/checkpoint_fingerprints.json",

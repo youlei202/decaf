@@ -9,6 +9,7 @@ import yaml
 
 from decaf.experiments.controlled.gpu_runtime import (
     CHECKPOINT_MANIFEST_ENV,
+    _behavior_mask,
     audit_score_trajectory,
     b200_enabled,
     build_b200_members,
@@ -98,6 +99,17 @@ def test_b200_gate_is_explicit() -> None:
     assert not b200_enabled({})
     assert not b200_enabled({"DECAF_B200_VERIFY": "true"})
     assert b200_enabled({"DECAF_B200_VERIFY": "1"})
+
+
+def test_aligned_and_opposed_behaviors_require_dominant_components() -> None:
+    scores = {
+        "endpoint_active": np.asarray([True, True, True, True]),
+        "E": np.asarray([0.4, 0.1, 0.0, 0.2]),
+        "C": np.asarray([0.1, 0.4, 0.0, 0.2]),
+    }
+
+    assert _behavior_mask(scores, "aligned").tolist() == [True, False, False, False]
+    assert _behavior_mask(scores, "opposed").tolist() == [False, True, False, False]
 
 
 def test_external_manifest_builds_only_real_cuda_members(tmp_path: Path) -> None:

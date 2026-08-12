@@ -878,9 +878,9 @@ def _behavior_mask(scores: Mapping[str, Any], behavior: str) -> np.ndarray:
     if behavior == "null":
         return ~active
     if behavior == "aligned":
-        return active & (evidence > 1.0e-10)
+        return active & (evidence > contradiction) & (evidence > 1.0e-10)
     if behavior == "opposed":
-        return active & (contradiction > 1.0e-10)
+        return active & (contradiction > evidence) & (contradiction > 1.0e-10)
     raise KeyError(behavior)
 
 

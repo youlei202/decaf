@@ -911,7 +911,7 @@ def _validate_attribution_resume(
         or resume.get("artifact_inventory_sha256") != _canonical_sha256(inventory_records)
     ):
         raise FinalizationError(f"{spec.key} immediate resume validation receipt differs")
-    return skipped, completed
+    return int(resume["resumed_members"]), int(resume["reexecuted"])
 
 
 def _validate_attribution(
@@ -928,10 +928,11 @@ def _validate_attribution(
     ):
         raise FinalizationError(f"{spec.key} attribution plan contract differs")
     _validate_attribution_member_bindings(evidence, spec, plan, global_receipt)
-    resumed, _completed = _validate_attribution_resume(evidence, spec, global_receipt)
+    resumed, reexecuted = _validate_attribution_resume(evidence, spec, global_receipt)
     return {
         "member_count": global_receipt["member_count"],
         "immediate_resume_skipped": resumed,
+        "immediate_resume_reexecuted": reexecuted,
         "scope": "real_cuda_single_b200_shard",
     }
 

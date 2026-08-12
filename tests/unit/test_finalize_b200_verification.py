@@ -1220,6 +1220,10 @@ def test_finalizer_emits_portable_honest_documents(
     assert status["paper_results"]["tables"]["mapped"] == 16
     assert status["paper_numeric_source"] == "sealed_historical_outputs"
     assert status["full_paper_scale_compute_rerun"] is False
+    for run, expected in (("attribution_main", 72), ("dinov2_g", 16), ("partimagenet", 8)):
+        shard = status["representative_shards"][run]
+        assert shard["immediate_resume_skipped"] == expected
+        assert shard["immediate_resume_reexecuted"] == 0
     assert status["multi_gpu_scheduler"] == {
         "static_plan": "PASS",
         "real_execution": "NOT_TESTED_SINGLE_GPU_NODE",

@@ -196,6 +196,168 @@ def test_cpu_provenance_transform_is_portable_auditable_and_non_mutating(
         module._copy_portable_cpu_provenance(provenance, tmp_path / "rejected")
 
 
+def _b200_projection_fixture(module: object, root: Path) -> dict[str, bytes]:
+    paths = module.B200_PORTABLE_EVIDENCE_FILES
+    payload = {
+        "case_count": 2,
+        "cases": [
+            {"path": "/work/Users/tester/checkpoints/first.pt"},
+            {"path": "/work/Users/tester/checkpoints/second.pt"},
+        ],
+    }
+    payload_path = root / paths[0]
+    payload_path.parent.mkdir(parents=True)
+    payload_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    report = {
+        "status": "passed",
+        "case_count": 2,
+        "checkpoint_fingerprints_path": "checkpoint_fingerprints.json",
+        "checkpoint_fingerprints_sha256": hashlib.sha256(payload_path.read_bytes()).hexdigest(),
+    }
+    report_path = root / paths[1]
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    wrapper = {
+        "status": "passed",
+        "steps": {"checkpoint_fingerprint": report},
+    }
+    wrapper_path = root / paths[2]
+    wrapper_path.write_text(json.dumps(wrapper, indent=2) + "\n", encoding="utf-8")
+    log_path = root / paths[3]
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "rootdir: /work/Users/tester/GitHub/decaf\n2 passed\n",
+        encoding="utf-8",
+    )
+    pytest_receipt = {
+        "status": "passed",
+        "output_log": {
+            "path": paths[3],
+            "sha256": hashlib.sha256(log_path.read_bytes()).hexdigest(),
+            "size_bytes": log_path.stat().st_size,
+        },
+    }
+    pytest_path = root / paths[4]
+    pytest_path.write_text(json.dumps(pytest_receipt, indent=2) + "\n", encoding="utf-8")
+    source_bytes = {relative: (root / relative).read_bytes() for relative in paths}
+    inventory = [
+        {
+            "path": relative,
+            "sha256": hashlib.sha256(source_bytes[relative]).hexdigest(),
+            "size_bytes": len(source_bytes[relative]),
+        }
+        for relative in paths
+    ]
+    provenance = {
+        "schema_version": 1,
+        "status": "passed",
+        "evidence_file_count": len(inventory),
+        "evidence_files": inventory,
+        "evidence_inventory_sha256": module._canonical_sha256(inventory),
+    }
+    provenance_path = root / "provenance/B200_PROVENANCE.json"
+    provenance_path.parent.mkdir()
+    provenance_path.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+    source_bytes["provenance/B200_PROVENANCE.json"] = provenance_path.read_bytes()
+    return source_bytes
+
+
+def test_b200_evidence_projection_preserves_portable_hash_closure(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    source = tmp_path / "source"
+    destination = tmp_path / "package" / "b200-verification"
+    originals = _b200_projection_fixture(module, source)
+
+    transform = module._project_b200_evidence_portability(source, destination)
+
+    assert transform["file_count"] == 5
+    assert transform["total_replacement_count"] == 3
+    assert transform["path_semantics"] == "source_host_logical_observation"
+    assert transform["source_observations_only"] is True
+    assert transform["external_artifacts_included"] is False
+    assert transform["source_files_modified"] is False
+    assert all(transform["closure_checks"].values())
+    assert [record["replacement_count"] for record in transform["files"]] == [
+        2,
+        0,
+        0,
+        1,
+        0,
+    ]
+    assert [record["dependency_rewrites"] for record in transform["files"]] == [
+        [],
+        ["checkpoint_fingerprints_sha256"],
+        ["steps.checkpoint_fingerprint"],
+        [],
+        ["output_log.sha256", "output_log.size_bytes"],
+    ]
+    for relative, payload in originals.items():
+        assert (source / relative).read_bytes() == payload
+
+    fingerprints = destination / module.B200_PORTABLE_EVIDENCE_FILES[0]
+    log = destination / module.B200_PORTABLE_EVIDENCE_FILES[3]
+    assert "/work/Users/" not in fingerprints.read_text(encoding="utf-8")
+    assert "source-host://workspace/checkpoints/first.pt" in fingerprints.read_text(
+        encoding="utf-8"
+    )
+    assert "source-host://workspace/GitHub/decaf" in log.read_text(encoding="utf-8")
+    report = json.loads(
+        (destination / module.B200_PORTABLE_EVIDENCE_FILES[1]).read_text(encoding="utf-8")
+    )
+    wrapper = json.loads(
+        (destination / module.B200_PORTABLE_EVIDENCE_FILES[2]).read_text(encoding="utf-8")
+    )
+    pytest_receipt = json.loads(
+        (destination / module.B200_PORTABLE_EVIDENCE_FILES[4]).read_text(encoding="utf-8")
+    )
+    assert (
+        report["checkpoint_fingerprints_sha256"]
+        == hashlib.sha256(fingerprints.read_bytes()).hexdigest()
+    )
+    assert wrapper["steps"]["checkpoint_fingerprint"] == report
+    assert pytest_receipt["output_log"]["sha256"] == hashlib.sha256(log.read_bytes()).hexdigest()
+    assert pytest_receipt["output_log"]["size_bytes"] == log.stat().st_size
+
+    provenance_path = destination / "provenance/B200_PROVENANCE.json"
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    assert provenance["evidence_inventory_sha256"] == module._canonical_sha256(
+        provenance["evidence_files"]
+    )
+    assert (
+        transform["raw_provenance_sha256"]
+        == hashlib.sha256(originals["provenance/B200_PROVENANCE.json"]).hexdigest()
+    )
+    assert (
+        transform["packaged_provenance_sha256"]
+        == hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+    )
+    persisted_transform = json.loads(
+        (destination / "provenance/B200_EVIDENCE_PORTABILITY_TRANSFORM.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert persisted_transform == transform
+    module._validate_packaged_evidence_projection(destination)
+    assert module._validate_public_payload(destination)["status"] == "passed"
+
+
+def test_b200_evidence_projection_rejects_raw_provenance_drift(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    source = tmp_path / "source"
+    _b200_projection_fixture(module, source)
+    payload = source / module.B200_PORTABLE_EVIDENCE_FILES[0]
+    payload.write_bytes(payload.read_bytes() + b"drift\n")
+
+    with pytest.raises(RuntimeError, match="differs from provenance"):
+        module._project_b200_evidence_portability(
+            source,
+            tmp_path / "destination",
+        )
+
+
 def test_zip_is_crc_checked_and_matches_package_manifest(tmp_path: Path) -> None:
     module = _module()
     package = tmp_path / "stage" / "release-name"

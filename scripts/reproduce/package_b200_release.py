@@ -108,6 +108,13 @@ PRIVATE_FRAGMENTS = (
 )
 WORK_USERS_PREFIX = re.compile(r"/work/Users/[A-Za-z0-9._-]+/")
 PORTABLE_WORKSPACE_PREFIX = "source-host://workspace/"
+B200_PORTABLE_EVIDENCE_FILES = (
+    "verification/checkpoint_fingerprints.json",
+    "verification/checkpoint_fingerprint_report.json",
+    "verification/checkpoint_fingerprint_verification.json",
+    "verification/final_audit/full_pytest.log",
+    "verification/final_audit/full_pytest.json",
+)
 
 
 def _command(repository: Path, *arguments: str) -> str:
@@ -131,6 +138,11 @@ def _sha256(path: Path) -> str:
 
 def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return _sha256_bytes(encoded)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -252,6 +264,221 @@ def _copy_portable_cpu_provenance(
     return payload
 
 
+def _portable_text_projection(path: Path) -> tuple[str, int]:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise RuntimeError(f"B200 evidence is not UTF-8 text: {path.name}") from error
+    return WORK_USERS_PREFIX.subn(PORTABLE_WORKSPACE_PREFIX, source)
+
+
+def _portable_evidence_record(
+    source: Path,
+    packaged: Path,
+    *,
+    relative: str,
+    replacement_count: int,
+    dependency_rewrites: list[str],
+) -> dict[str, Any]:
+    return {
+        "path": relative,
+        "source_bytes": source.stat().st_size,
+        "source_sha256": _sha256(source),
+        "packaged_bytes": packaged.stat().st_size,
+        "packaged_sha256": _sha256(packaged),
+        "replacement_count": replacement_count,
+        "dependency_rewrites": dependency_rewrites,
+    }
+
+
+def _validate_packaged_evidence_projection(destination: Path) -> None:
+    fingerprints = destination / B200_PORTABLE_EVIDENCE_FILES[0]
+    report_path = destination / B200_PORTABLE_EVIDENCE_FILES[1]
+    wrapper_path = destination / B200_PORTABLE_EVIDENCE_FILES[2]
+    log_path = destination / B200_PORTABLE_EVIDENCE_FILES[3]
+    pytest_path = destination / B200_PORTABLE_EVIDENCE_FILES[4]
+    provenance_path = destination / "provenance/B200_PROVENANCE.json"
+    report = _read_json(report_path)
+    wrapper = _read_json(wrapper_path)
+    pytest_receipt = _read_json(pytest_path)
+    provenance = _read_json(provenance_path)
+    if report.get("checkpoint_fingerprints_sha256") != _sha256(fingerprints):
+        raise RuntimeError("packaged checkpoint fingerprint report is not closed")
+    if wrapper.get("steps", {}).get("checkpoint_fingerprint") != report:
+        raise RuntimeError("packaged checkpoint fingerprint wrapper is not closed")
+    output_log = pytest_receipt.get("output_log", {})
+    if (
+        output_log.get("sha256") != _sha256(log_path)
+        or output_log.get("size_bytes") != log_path.stat().st_size
+    ):
+        raise RuntimeError("packaged full-pytest receipt is not closed")
+    inventory = provenance.get("evidence_files")
+    if (
+        not isinstance(inventory, list)
+        or provenance.get("evidence_file_count") != len(inventory)
+        or provenance.get("evidence_inventory_sha256") != _canonical_sha256(inventory)
+    ):
+        raise RuntimeError("packaged B200 provenance inventory is not closed")
+    inventory_by_path = {
+        str(record.get("path")): record for record in inventory if isinstance(record, dict)
+    }
+    if len(inventory_by_path) != len(inventory):
+        raise RuntimeError("packaged B200 provenance contains duplicate paths")
+    for relative in B200_PORTABLE_EVIDENCE_FILES:
+        path = destination / relative
+        record = inventory_by_path.get(relative)
+        if (
+            not isinstance(record, dict)
+            or record.get("sha256") != _sha256(path)
+            or record.get("size_bytes") != path.stat().st_size
+        ):
+            raise RuntimeError(f"packaged B200 provenance differs: {relative}")
+
+
+def _project_b200_evidence_portability(
+    verification_root: Path,
+    destination: Path,
+) -> dict[str, Any]:
+    """Project path-bearing B200 evidence while preserving its hash closure."""
+
+    raw_provenance_path = verification_root / "provenance/B200_PROVENANCE.json"
+    raw_provenance = _read_json(raw_provenance_path)
+    raw_inventory = raw_provenance.get("evidence_files")
+    if (
+        not isinstance(raw_inventory, list)
+        or raw_provenance.get("evidence_file_count") != len(raw_inventory)
+        or raw_provenance.get("evidence_inventory_sha256") != _canonical_sha256(raw_inventory)
+    ):
+        raise RuntimeError("raw B200 provenance inventory is not closed")
+    raw_by_path = {
+        str(record.get("path")): record for record in raw_inventory if isinstance(record, dict)
+    }
+    if len(raw_by_path) != len(raw_inventory):
+        raise RuntimeError("raw B200 provenance contains duplicate paths")
+    for relative in B200_PORTABLE_EVIDENCE_FILES:
+        source = verification_root / relative
+        record = raw_by_path.get(relative)
+        if (
+            not source.is_file()
+            or source.is_symlink()
+            or not isinstance(record, dict)
+            or record.get("sha256") != _sha256(source)
+            or record.get("size_bytes") != source.stat().st_size
+        ):
+            raise RuntimeError(f"raw B200 evidence differs from provenance: {relative}")
+
+    source_payload = verification_root / B200_PORTABLE_EVIDENCE_FILES[0]
+    packaged_payload = destination / B200_PORTABLE_EVIDENCE_FILES[0]
+    payload_text, payload_replacements = _portable_text_projection(source_payload)
+    atomic_text(packaged_payload, payload_text)
+    _read_json(packaged_payload)
+
+    source_report = verification_root / B200_PORTABLE_EVIDENCE_FILES[1]
+    packaged_report = destination / B200_PORTABLE_EVIDENCE_FILES[1]
+    report = _read_json(source_report)
+    report["checkpoint_fingerprints_sha256"] = _sha256(packaged_payload)
+    atomic_json(packaged_report, report)
+
+    source_wrapper = verification_root / B200_PORTABLE_EVIDENCE_FILES[2]
+    packaged_wrapper = destination / B200_PORTABLE_EVIDENCE_FILES[2]
+    wrapper = _read_json(source_wrapper)
+    steps = wrapper.get("steps")
+    if not isinstance(steps, dict) or "checkpoint_fingerprint" not in steps:
+        raise RuntimeError("checkpoint fingerprint wrapper schema differs")
+    steps["checkpoint_fingerprint"] = report
+    atomic_json(packaged_wrapper, wrapper)
+
+    source_log = verification_root / B200_PORTABLE_EVIDENCE_FILES[3]
+    packaged_log = destination / B200_PORTABLE_EVIDENCE_FILES[3]
+    log_text, log_replacements = _portable_text_projection(source_log)
+    atomic_text(packaged_log, log_text)
+
+    source_pytest = verification_root / B200_PORTABLE_EVIDENCE_FILES[4]
+    packaged_pytest = destination / B200_PORTABLE_EVIDENCE_FILES[4]
+    pytest_receipt = _read_json(source_pytest)
+    output_log = pytest_receipt.get("output_log")
+    if not isinstance(output_log, dict):
+        raise RuntimeError("full-pytest receipt output-log schema differs")
+    output_log["sha256"] = _sha256(packaged_log)
+    output_log["size_bytes"] = packaged_log.stat().st_size
+    atomic_json(packaged_pytest, pytest_receipt)
+
+    dependency_rewrites = {
+        B200_PORTABLE_EVIDENCE_FILES[0]: [],
+        B200_PORTABLE_EVIDENCE_FILES[1]: [
+            "checkpoint_fingerprints_sha256",
+        ],
+        B200_PORTABLE_EVIDENCE_FILES[2]: [
+            "steps.checkpoint_fingerprint",
+        ],
+        B200_PORTABLE_EVIDENCE_FILES[3]: [],
+        B200_PORTABLE_EVIDENCE_FILES[4]: [
+            "output_log.sha256",
+            "output_log.size_bytes",
+        ],
+    }
+    replacements = {
+        B200_PORTABLE_EVIDENCE_FILES[0]: payload_replacements,
+        B200_PORTABLE_EVIDENCE_FILES[1]: 0,
+        B200_PORTABLE_EVIDENCE_FILES[2]: 0,
+        B200_PORTABLE_EVIDENCE_FILES[3]: log_replacements,
+        B200_PORTABLE_EVIDENCE_FILES[4]: 0,
+    }
+    records = [
+        _portable_evidence_record(
+            verification_root / relative,
+            destination / relative,
+            relative=relative,
+            replacement_count=replacements[relative],
+            dependency_rewrites=dependency_rewrites[relative],
+        )
+        for relative in B200_PORTABLE_EVIDENCE_FILES
+    ]
+    projected = {**raw_provenance, "evidence_files": [dict(row) for row in raw_inventory]}
+    projected_by_path = {str(record["path"]): record for record in projected["evidence_files"]}
+    for record in records:
+        projected_by_path[record["path"]].update(
+            {
+                "sha256": record["packaged_sha256"],
+                "size_bytes": record["packaged_bytes"],
+            }
+        )
+    projected["evidence_inventory_sha256"] = _canonical_sha256(projected["evidence_files"])
+    packaged_provenance_path = destination / "provenance/B200_PROVENANCE.json"
+    atomic_json(packaged_provenance_path, projected)
+    _validate_packaged_evidence_projection(destination)
+
+    transform = {
+        "schema_version": 1,
+        "status": "passed",
+        "transform": "coordinated_b200_evidence_path_projection",
+        "replacement_prefix": PORTABLE_WORKSPACE_PREFIX,
+        "path_semantics": "source_host_logical_observation",
+        "source_observations_only": True,
+        "external_artifacts_included": False,
+        "source_files_modified": False,
+        "raw_provenance_bytes": raw_provenance_path.stat().st_size,
+        "raw_provenance_sha256": _sha256(raw_provenance_path),
+        "raw_evidence_inventory_sha256": raw_provenance["evidence_inventory_sha256"],
+        "packaged_evidence_inventory_sha256": projected["evidence_inventory_sha256"],
+        "packaged_provenance_bytes": packaged_provenance_path.stat().st_size,
+        "packaged_provenance_sha256": _sha256(packaged_provenance_path),
+        "file_count": len(records),
+        "total_replacement_count": sum(replacements.values()),
+        "files": records,
+        "closure_checks": {
+            "raw_sources_match_provenance": True,
+            "fingerprint_report_payload_hash": True,
+            "fingerprint_wrapper_embedded_report": True,
+            "full_pytest_receipt_log_hash_and_size": True,
+            "packaged_provenance_inventory": True,
+        },
+    }
+    transform_path = destination / "provenance/B200_EVIDENCE_PORTABILITY_TRANSFORM.json"
+    atomic_json(transform_path, transform)
+    return transform
+
+
 def _copy_evidence(
     verification_root: Path,
     destination: Path,
@@ -266,6 +493,7 @@ def _copy_evidence(
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    _project_b200_evidence_portability(verification_root, destination)
     analysis = _read_json(verification_root / "verification/analysis_replay.json")
     inventory = analysis.get("artifact_inventory")
     if not isinstance(inventory, list) or len(inventory) != 60:

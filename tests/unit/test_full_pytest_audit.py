@@ -39,3 +39,47 @@ def test_receipt_is_portable_and_hash_bound(tmp_path: Path) -> None:
     assert receipt["tracked_worktree_clean"] is True
     assert receipt["output_log"]["path"] == "verification/final_audit/full_pytest.log"
     assert len(receipt["output_log"]["sha256"]) == 64
+
+
+def test_pinned_environment_removes_b200_gate_and_records_only_hashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    builder = _module()["_pinned_environment"]
+    assert callable(builder)
+    covertype = tmp_path / "covertype"
+    covertype.mkdir()
+    (covertype / "covertype_balanced_240000_split7601.npz").write_bytes(b"archive")
+    idsds = tmp_path / "idsds.parquet"
+    idsds.write_bytes(b"manifest")
+    reference = tmp_path / "reference.zip"
+    reference.write_bytes(b"zip")
+    monkeypatch.setenv("DECAF_B200_VERIFY", "1")
+    monkeypatch.setenv("DECAF_DATA_ROOT", "wrong")
+
+    environment, contract = builder(
+        covertype_data_root=covertype,
+        idsds_manifest=idsds,
+        reference_runs_root=str(reference),
+    )
+
+    assert "DECAF_B200_VERIFY" not in environment
+    assert environment["DECAF_DATA_ROOT"] == str(covertype.resolve())
+    assert environment["DECAF_IDSDS_MANIFEST"] == str(idsds.resolve())
+    assert contract["b200_gate_removed"] is True
+    assert str(tmp_path) not in str(contract)
+    assert set(contract["assets"]) == {
+        "covertype_archive",
+        "idsds_manifest",
+        "reference_run_archives",
+    }
+
+
+def test_pinned_environment_requires_real_covertype_archive(tmp_path: Path) -> None:
+    builder = _module()["_pinned_environment"]
+    assert callable(builder)
+    with pytest.raises(FileNotFoundError, match="Covertype archive"):
+        builder(
+            covertype_data_root=tmp_path,
+            idsds_manifest=None,
+            reference_runs_root=None,
+        )

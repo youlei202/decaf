@@ -100,6 +100,12 @@ REQUIRED_ATTRIBUTION_MEMBER_COUNTS = {
     "resume_test": 5,
 }
 REQUIRED_FULL_PYTEST_COMMAND = ("python", "-m", "pytest")
+REQUIRED_FULL_PYTEST_ENVIRONMENT_MODE = "cpu_oracle_with_pinned_real_assets"
+REQUIRED_FULL_PYTEST_ASSETS = {
+    "covertype_archive",
+    "idsds_manifest",
+    "reference_run_archives",
+}
 REQUIRED_ANALYSIS_VALUES: dict[str, Any] = {
     "status": "passed",
     "reference_runs_verified": 9,
@@ -1522,6 +1528,10 @@ def _validate_full_pytest(evidence: Evidence, identity: RepositoryIdentity) -> d
     started = _utc_timestamp(receipt.get("started_at"), "full pytest started_at")
     finished = _utc_timestamp(receipt.get("finished_at"), "full pytest finished_at")
     log = _require_mapping(receipt.get("output_log"), "full pytest output log")
+    environment = _require_mapping(
+        receipt.get("environment_contract"), "full pytest environment contract"
+    )
+    assets = _require_mapping(environment.get("assets"), "full pytest pinned assets")
     relative = log.get("path")
     if (
         receipt.get("schema_version") != 1
@@ -1536,6 +1546,11 @@ def _validate_full_pytest(evidence: Evidence, identity: RepositoryIdentity) -> d
         or not isinstance(receipt.get("passed_tests"), int)
         or isinstance(receipt.get("passed_tests"), bool)
         or receipt.get("passed_tests", 0) < 1
+        or environment.get("mode") != REQUIRED_FULL_PYTEST_ENVIRONMENT_MODE
+        or environment.get("b200_gate_removed") is not True
+        or set(assets) != REQUIRED_FULL_PYTEST_ASSETS
+        or not isinstance(assets.get("reference_run_archives"), list)
+        or len(assets.get("reference_run_archives", [])) != 9
         or not isinstance(relative, str)
         or relative != "verification/final_audit/full_pytest.log"
         or log.get("streams") != "stdout+stderr"
@@ -1545,6 +1560,17 @@ def _validate_full_pytest(evidence: Evidence, identity: RepositoryIdentity) -> d
         or log.get("size_bytes", 0) < 1
     ):
         raise FinalizationError("final full pytest receipt contract differs")
+    asset_records = [assets["covertype_archive"], assets["idsds_manifest"]]
+    asset_records.extend(assets["reference_run_archives"])
+    if any(
+        not isinstance(record, Mapping)
+        or not _is_sha256(record.get("sha256"))
+        or not isinstance(record.get("size_bytes"), int)
+        or isinstance(record.get("size_bytes"), bool)
+        or record.get("size_bytes", 0) < 1
+        for record in asset_records
+    ):
+        raise FinalizationError("full pytest pinned asset inventory differs")
     output_path = evidence.file(_safe_relative(relative))
     if output_path.stat().st_size != log.get("size_bytes") or _sha256(output_path) != log.get(
         "sha256"
@@ -1675,6 +1701,14 @@ def _validate_analysis_inventory(evidence: Evidence, analysis: Mapping[str, Any]
 def _validate_analysis(evidence: Evidence, identity: RepositoryIdentity) -> dict[str, Any]:
     analysis = evidence.json("verification/analysis_replay.json")
     _require_bound(analysis, identity, "analysis replay")
+    wrapper = evidence.json("verification/cpu_verification.json")
+    if (
+        wrapper.get("status") != "passed"
+        or wrapper.get("mode") != "analysis-replay"
+        or wrapper.get("steps", {}).get("analysis_replay") != analysis
+    ):
+        raise FinalizationError("analysis-replay CLI wrapper differs from its report")
+    _require_bound(wrapper, identity, "analysis-replay CLI wrapper")
     for key, expected in REQUIRED_ANALYSIS_VALUES.items():
         if analysis.get(key) != expected:
             raise FinalizationError(
@@ -1685,7 +1719,8 @@ def _validate_analysis(evidence: Evidence, identity: RepositoryIdentity) -> dict
     if (
         headline.get("status") != "passed"
         or headline.get("assertion_count") != 27
-        or headline.get("verified_count", 0) + headline.get("source_missing_count", 0) != 27
+        or headline.get("verified_count") != 27
+        or headline.get("source_missing_count") != 0
     ):
         raise FinalizationError("headline assertion receipt is incomplete")
     diff_rows = list(

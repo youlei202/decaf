@@ -941,6 +941,23 @@ def _audit_reports(root: Path) -> None:
             "finished_at": "2026-08-12T19:01:00Z",
             "elapsed_seconds": 60.0,
             "passed_tests": 321,
+            "environment_contract": {
+                "mode": "cpu_oracle_with_pinned_real_assets",
+                "b200_gate_removed": True,
+                "inherited_b200_variables_removed": [
+                    "DECAF_B200_VERIFY",
+                    "DECAF_ALLOW_NON_B200_TEST",
+                    "DECAF_RESUME_TEST_MEMBER_DELAY_SECONDS",
+                ],
+                "assets": {
+                    "covertype_archive": {"sha256": "1" * 64, "size_bytes": 10},
+                    "idsds_manifest": {"sha256": "2" * 64, "size_bytes": 20},
+                    "reference_run_archives": [
+                        {"sha256": f"{index + 3:064x}", "size_bytes": 30 + index}
+                        for index in range(9)
+                    ],
+                },
+            },
             "output_log": {
                 "path": "verification/final_audit/full_pytest.log",
                 "streams": "stdout+stderr",
@@ -1105,6 +1122,16 @@ def _analysis(root: Path) -> None:
         **_identity(),
     }
     _write_json(verification / "analysis_replay.json", analysis)
+    _write_json(
+        verification / "cpu_verification.json",
+        {
+            "schema_version": 1,
+            "status": "passed",
+            "mode": "analysis-replay",
+            "steps": {"analysis_replay": analysis},
+            **_identity(),
+        },
+    )
 
 
 def _tmux_logs(root: Path) -> None:
@@ -1299,6 +1326,10 @@ def test_finalizer_rejects_tampered_analysis_before_writing(
     analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
     analysis["figures_regenerated"] = 12
     _write_json(analysis_path, analysis)
+    wrapper_path = root / "verification/cpu_verification.json"
+    wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
+    wrapper["steps"]["analysis_replay"] = analysis
+    _write_json(wrapper_path, wrapper)
 
     with pytest.raises(module.FinalizationError, match="figures_regenerated"):
         module.finalize_b200_verification(
@@ -1309,3 +1340,22 @@ def test_finalizer_rejects_tampered_analysis_before_writing(
     assert not (root / "B200_VERIFICATION_STATUS.json").exists()
     assert not (root / "B200_VERIFICATION_REPORT.md").exists()
     assert not (root / "provenance/B200_PROVENANCE.json").exists()
+
+
+def test_finalizer_rejects_analysis_wrapper_from_another_invocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _module()
+    root = tmp_path / "b200-verification"
+    _fixture(root)
+    _patch_runtime(monkeypatch, module)
+    wrapper_path = root / "verification/cpu_verification.json"
+    wrapper = json.loads(wrapper_path.read_text(encoding="utf-8"))
+    wrapper["steps"]["analysis_replay"]["reference_runs_verified"] = 8
+    _write_json(wrapper_path, wrapper)
+
+    with pytest.raises(module.FinalizationError, match="CLI wrapper differs"):
+        module.finalize_b200_verification(
+            repository=tmp_path / "repository",
+            verification_root=root,
+        )

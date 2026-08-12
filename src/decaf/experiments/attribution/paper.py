@@ -51,36 +51,66 @@ TABLES: tuple[tuple[int, str, str, Selector | None], ...] = (
         2,
         "funnybirds_idsds_attribution",
         "method_results.csv",
-        _scopes("idsds_primary", "funnybirds_primary"),
+        _scopes(
+            "idsds_primary",
+            "funnybirds_primary",
+            "smoke_idsds_primary",
+            "smoke_funnybirds_primary",
+        ),
     ),
     (3, "dinov2_g_stress_test", "large_model_quality_timing_join", None),
     (
         4,
         "endpoint_m_pairwise",
         "pairwise_differences.csv",
-        _scopes("idsds_primary", "funnybirds_primary"),
+        _scopes(
+            "idsds_primary",
+            "funnybirds_primary",
+            "smoke_idsds_primary",
+            "smoke_funnybirds_primary",
+        ),
     ),
     (
         6,
         "complete_cross_dataset_attribution",
         "method_results.csv",
-        _scopes("idsds_primary", "funnybirds_primary"),
+        _scopes(
+            "idsds_primary",
+            "funnybirds_primary",
+            "smoke_idsds_primary",
+            "smoke_funnybirds_primary",
+        ),
     ),
     (
         7,
         "paired_endpoint_trajectory",
         "pairwise_differences.csv",
-        _scopes("idsds_primary", "funnybirds_primary"),
+        _scopes(
+            "idsds_primary",
+            "funnybirds_primary",
+            "smoke_idsds_primary",
+            "smoke_funnybirds_primary",
+        ),
     ),
     (
         8,
         "architecture_endpoint_ablation",
         "per_model_results.csv",
-        _scopes("idsds_primary", "funnybirds_primary"),
+        _scopes(
+            "idsds_primary",
+            "funnybirds_primary",
+            "smoke_idsds_primary",
+            "smoke_funnybirds_primary",
+        ),
     ),
     (9, "idsds_full50k", "method_results.csv", _scope("idsds_full50k")),
     (10, "imagenet_compute", "timing_summary.csv", _dataset("imagenet1k_idsds")),
-    (11, "partimagenet_boundary", "method_results.csv", _scope("partimagenet_boundary")),
+    (
+        11,
+        "partimagenet_boundary",
+        "method_results.csv",
+        _scopes("partimagenet_boundary", "smoke_partimagenet_boundary"),
+    ),
 )
 
 
@@ -92,7 +122,9 @@ def _source(metrics: Path, name: str) -> pd.DataFrame:
 
 
 def _large_model_join(metrics: Path) -> pd.DataFrame:
-    quality = _scope("dinov2_g_quality")(_source(metrics, "per_model_results.csv"))
+    quality = _scopes("dinov2_g_quality", "smoke_dinov2_g_quality")(
+        _source(metrics, "per_model_results.csv")
+    )
     timing = _source(metrics, "timing_summary.csv")
     if not timing.empty:
         timing = timing.loc[timing["model"].astype(str) == "dinov2_vit_g_14"].copy()
@@ -100,6 +132,19 @@ def _large_model_join(metrics: Path) -> pd.DataFrame:
         return quality
     keys = ["dataset", "model", "method"]
     return quality.merge(timing, on=keys, how="outer", validate="one_to_one")
+
+
+def _required_verification_tables(context: RunContext) -> frozenset[int]:
+    execution = context.config.get("execution", {})
+    if not isinstance(execution, dict) or execution.get("scheduler") != (
+        "single_gpu_dynamic_queue"
+    ):
+        return frozenset()
+    return {
+        "smoke": frozenset((2, 4, 6, 7, 8)),
+        "large-model-smoke": frozenset((3, 10)),
+        "boundary-smoke": frozenset((11,)),
+    }.get(context.profile, frozenset())
 
 
 def _latex_cell(value: object) -> str:
@@ -152,6 +197,7 @@ def paper(context: RunContext) -> dict[str, Any]:
             "implemented"
         )
     destination = context.path / "paper_data"
+    required_nonempty = _required_verification_tables(context)
     manifest_rows: list[dict[str, Any]] = []
     cache: dict[str, pd.DataFrame] = {}
     for number, label, source_name, selector in TABLES:
@@ -183,6 +229,10 @@ def paper(context: RunContext) -> dict[str, Any]:
                 "metrics/per_model_results.csv + metrics/timing_summary.csv"
                 if source_name == "large_model_quality_timing_join"
                 else f"metrics/{source_name}"
+            )
+        if number in required_nonempty and selected.empty:
+            raise RuntimeError(
+                f"single-B200 attribution paper table {number} is unexpectedly empty"
             )
         stem = f"table_{number:02d}_{label}"
         csv_path = destination / f"{stem}.csv"

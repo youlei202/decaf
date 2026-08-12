@@ -80,9 +80,7 @@ def test_variable_raw_sizes_are_preprocessed_before_batching(tmp_path: Path) -> 
     image_module.new("RGB", (317, 191), color=(255, 0, 0)).save(first)
     image_module.new("RGB", (173, 349), color=(0, 255, 0)).save(second)
 
-    batch = preprocess_paths(
-        [first.name, second.name], dataset_root=tmp_path, size=224
-    )
+    batch = preprocess_paths([first.name, second.name], dataset_root=tmp_path, size=224)
     assert batch.shape == (2, 3, 224, 224)
     assert batch.dtype == np.float32
     assert batch.flags.c_contiguous

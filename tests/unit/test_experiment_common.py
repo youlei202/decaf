@@ -63,6 +63,45 @@ def test_standard_run_schema_and_terminal_status(tmp_path: Path) -> None:
     assert all(context.stage_completed(stage) for stage in requested_stages("all"))
 
 
+def test_resume_validator_writes_independent_hash_bound_receipt(tmp_path: Path) -> None:
+    context = _context(tmp_path)
+    handlers = {
+        stage: (lambda _context, name=stage: {"name": name}) for stage in requested_stages("all")
+    }
+    assert execute_run(context, handlers) == 0
+    source_compute = context.stage_receipt("compute").read_bytes()
+
+    resumed = RunContext.create(
+        experiment="example",
+        profile="smoke",
+        stage="all",
+        output=context.path,
+        config={"experiment": "example"},
+        workers=1,
+        resume=True,
+    )
+    calls: list[str] = []
+
+    def validate(_context: RunContext, stage: str) -> dict[str, int]:
+        calls.append(stage)
+        return {"member_count": 3 if stage == "compute" else 0}
+
+    validators = {
+        stage: (lambda current, name=stage: validate(current, name))
+        for stage in requested_stages("all")
+    }
+    assert execute_run(resumed, handlers, validators) == 0
+    assert calls == list(requested_stages("all"))
+    assert context.stage_receipt("compute").read_bytes() == source_compute
+    receipt = json.loads((context.path / "receipts/resume/compute.json").read_text())
+    assert receipt["status"] == "completed"
+    assert receipt["member_count"] == receipt["resumed_members"] == 3
+    assert receipt["reexecuted"] == 0
+    assert len(receipt["source_compute_receipt_sha256"]) == 64
+    assert receipt["artifact_inventory"]
+    assert len(receipt["artifact_inventory_sha256"]) == 64
+
+
 def test_failed_handler_never_leaves_running_receipt(tmp_path: Path) -> None:
     context = _context(tmp_path)
 

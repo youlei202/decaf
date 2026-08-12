@@ -52,6 +52,13 @@ training and inference require the datasets and checkpoints documented in
 hardware. The CPU verification suite runs the common core, a real Covertype
 shard, schema checks, and static audits of every full experiment plan.
 
+The v2 verification release additionally records representative real shards on
+one NVIDIA B200, including checkpoint fingerprints, controlled and ImageNet-9
+compute, attribution main/DINOv2-g/PartImageNet paths, SIGTERM resume, and the
+single-device scheduler. It deliberately does not claim a full paper-scale
+rerun or real multi-GPU execution; sealed historical outputs remain the source
+of the regenerated paper numbers.
+
 ## Repository contract
 
 Each run follows the schema in `docs/result_schema.md`. Generated PDF files,

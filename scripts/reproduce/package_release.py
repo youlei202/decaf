@@ -14,7 +14,7 @@ import tempfile
 import zipfile
 from collections import Counter
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,8 @@ from decaf.paper.semantic import (
     load_canonical_asset,
     semantic_contract_sha256,
 )
+
+UTC_TIMEZONE = getattr(__import__("datetime"), "UTC", timezone.utc)  # noqa: UP017
 
 PROVENANCE_FILES = (
     "historical_git_state.json",
@@ -1204,7 +1206,7 @@ def build_release(
     snapshots = _validate_source_snapshots(provenance, recovery)
     historical_bundle = _validate_historical_bundle(provenance, repository)
     drift = _validate_historical_drift(historical_drift.resolve(), provenance)
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC_TIMEZONE).strftime("%Y%m%dT%H%M%SZ")
     basename = f"decaf_reproducibility_release_v1_{timestamp}"
     destination = release_root / "packages" / f"{basename}.zip"
 

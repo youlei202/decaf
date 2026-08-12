@@ -113,8 +113,10 @@ def _selected_source_pairs(assets: B200Assets, settings: Mapping[str, Any]) -> p
     if "split" in candidates and (candidates["split"].astype(str) == "deep_split").sum() >= 16:
         candidates = candidates[candidates["split"].astype(str) == "deep_split"].copy()
     seed = int(settings["selection_seed"])
-    candidates["_selection_key"] = candidates["pair_id"].astype(str).map(
-        lambda pair_id: hashlib.sha256(f"{seed}|{pair_id}".encode()).hexdigest()
+    candidates["_selection_key"] = (
+        candidates["pair_id"]
+        .astype(str)
+        .map(lambda pair_id: hashlib.sha256(f"{seed}|{pair_id}".encode()).hexdigest())
     )
     candidates = candidates.sort_values(
         ["true_in9_class", "_selection_key", "pair_id"], kind="stable"
@@ -736,8 +738,7 @@ def compute_b200(context: RunContext) -> dict[str, Any]:
                 member
                 for member in members
                 if not (
-                    context.resume
-                    and _receipt_reusable(context, member, run_bindings=bindings)
+                    context.resume and _receipt_reusable(context, member, run_bindings=bindings)
                 )
             ]
             if not pending:
@@ -757,9 +758,7 @@ def compute_b200(context: RunContext) -> dict[str, Any]:
                 for member in members:
                     member_id = str(member["member_id"])
                     receipt_path = context.path / str(member["receipt"])
-                    if context.resume and _receipt_reusable(
-                        context, member, run_bindings=bindings
-                    ):
+                    if context.resume and _receipt_reusable(context, member, run_bindings=bindings):
                         receipts[member_id] = load_member_receipt(receipt_path)
                         reused += 1
                         continue

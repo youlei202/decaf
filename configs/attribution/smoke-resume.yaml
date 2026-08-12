@@ -1,0 +1,25 @@
+experiment: attribution
+profile: smoke-resume
+max_workers: 1
+execution:
+  backend: gpu
+  adapter: decaf.experiments.attribution.gpu_runtime:evaluate_member
+  requires_gpu: true
+  scheduler: single_gpu_dynamic_queue
+  precision: fp32
+  fixed_images: 8
+  dataset_root_env: DECAF_DATA_ROOT
+  checkpoint_root_env: DECAF_CACHE_ROOT
+  dataset_manifests:
+    imagenet1k_idsds: ${DECAF_IDSDS_MANIFEST}
+  checkpoint_files:
+    idsds_resnet50: ${DECAF_CHECKPOINT_IDSDS_RESNET50}
+    torchvision_resnet50: ${DECAF_CHECKPOINT_TORCHVISION_RESNET50}
+statistics:
+  bootstrap_replicates: 200
+  bootstrap_seed: 8218
+  endpoint_anchor: decaf_5
+plan:
+  include:
+    - resume_idsds_deletion_targets
+    - resume_idsds_primary

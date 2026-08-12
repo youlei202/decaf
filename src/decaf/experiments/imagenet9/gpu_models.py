@@ -141,9 +141,7 @@ def resolve_b200_assets(
     weight_cache_root = _required_environment_path(
         env, variables["weight_cache_root"], directory=True
     )
-    checkpoint_root = _required_environment_path(
-        env, variables["checkpoint_root"], directory=True
-    )
+    checkpoint_root = _required_environment_path(env, variables["checkpoint_root"], directory=True)
     mapping_override = env.get(variables["official_mapping"])
     if mapping_override:
         mapping = Path(mapping_override).expanduser().resolve()
@@ -247,9 +245,7 @@ def load_official_mapping(path: str | Path, torch: Any) -> Any:
         raise ValueError("official mapping must contain every ImageNet index 0..999 exactly once")
     if any(value < -1 or value >= NUM_IMAGENET9_CLASSES for value in normalized.values()):
         raise ValueError("official mapping values must be -1 or a superclass in 0..8")
-    if {value for value in normalized.values() if value >= 0} != set(
-        range(NUM_IMAGENET9_CLASSES)
-    ):
+    if {value for value in normalized.values() if value >= 0} != set(range(NUM_IMAGENET9_CLASSES)):
         raise ValueError("official mapping does not cover all nine ImageNet-9 classes")
     matrix = torch.zeros((NUM_IMAGENET9_CLASSES, NUM_IMAGENET_CLASSES), dtype=torch.float32)
     for source, target in normalized.items():
@@ -308,8 +304,10 @@ def to_imagenet9_probabilities(
     else:
         raise ValueError("expected_classes must equal 9 or 1000")
     detached = result.detach()
-    if not bool(torch.isfinite(detached).all()) or bool((detached < -1.0e-7).any()) or bool(
-        (detached > 1.0 + 1.0e-7).any()
+    if (
+        not bool(torch.isfinite(detached).all())
+        or bool((detached < -1.0e-7).any())
+        or bool((detached > 1.0 + 1.0e-7).any())
     ):
         raise FloatingPointError("ImageNet-9 probability adapter produced invalid probabilities")
     return result
@@ -391,12 +389,8 @@ def probability_model(
                 mapping_matrix if self.output_classes == 1000 else torch.empty(0),
                 persistent=True,
             )
-            self.register_buffer(
-                "mean", torch.tensor((0.485, 0.456, 0.406)).view(1, 3, 1, 1)
-            )
-            self.register_buffer(
-                "std", torch.tensor((0.229, 0.224, 0.225)).view(1, 3, 1, 1)
-            )
+            self.register_buffer("mean", torch.tensor((0.485, 0.456, 0.406)).view(1, 3, 1, 1))
+            self.register_buffer("std", torch.tensor((0.229, 0.224, 0.225)).view(1, 3, 1, 1))
 
         def normalized_logits(self, images: Any) -> Any:
             return extract_logits(self.base_model((images - self.mean) / self.std), torch)

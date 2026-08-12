@@ -24,7 +24,7 @@ def _matrix(value: Any, *, name: str) -> tuple[np.ndarray, bool]:
 
 
 def row_spearman(left: Any, right: Any) -> np.ndarray:
-    """Return stable average-rank Spearman correlation for every row."""
+    """Return frozen safe-zero average-rank Spearman for every finite row."""
 
     first, _ = _matrix(left, name="left")
     second, _ = _matrix(right, name="right")
@@ -39,9 +39,10 @@ def row_spearman(left: Any, right: Any) -> np.ndarray:
         np.sum(left_rank * left_rank, axis=1, dtype=np.float64)
         * np.sum(right_rank * right_rank, axis=1, dtype=np.float64)
     )
-    if np.any(denominator == 0.0):
-        raise ValueError("Spearman correlation is undefined for a constant row")
-    return np.asarray(numerator / denominator, dtype=np.float64)
+    result = np.zeros_like(numerator, dtype=np.float64)
+    valid = denominator > 0.0
+    result[valid] = numerator[valid] / denominator[valid]
+    return result
 
 
 def endpoint_m_quality(endpoint_m: Any, target_effects: Any) -> np.ndarray:
@@ -144,10 +145,38 @@ def append_endpoint_m(
     endpoint["source_method"] = anchor_method
     endpoint["method"] = "endpoint_m"
     endpoint["patch_scores"] = [row.copy() for row in magnitudes]
-    endpoint["spearman"] = [
-        float(endpoint_m_quality(magnitude, target)[0])
-        for magnitude, target in zip(magnitudes, quality_targets, strict=True)
-    ]
+    endpoint_quality: list[float] = []
+    background_quality: list[float] = []
+    telea_quality: list[float] = []
+    has_heldout_columns = {
+        "quality_aggregation",
+        "heldout_background_texture_effects",
+        "heldout_telea_dilate3_effects",
+    }.issubset(anchor.columns)
+    for index, (magnitude, target) in enumerate(zip(magnitudes, quality_targets, strict=True)):
+        aggregation = str(anchor.iloc[index]["quality_aggregation"]) if has_heldout_columns else ""
+        if aggregation == "equal_mean_of_operator_spearman":
+            background = np.asarray(
+                anchor.iloc[index]["heldout_background_texture_effects"],
+                dtype=np.float64,
+            ).reshape(-1)
+            telea = np.asarray(
+                anchor.iloc[index]["heldout_telea_dilate3_effects"],
+                dtype=np.float64,
+            ).reshape(-1)
+            first = float(endpoint_m_quality(magnitude, background)[0])
+            second = float(endpoint_m_quality(magnitude, telea)[0])
+            background_quality.append(first)
+            telea_quality.append(second)
+            endpoint_quality.append(0.5 * (first + second))
+        else:
+            endpoint_quality.append(float(endpoint_m_quality(magnitude, target)[0]))
+            background_quality.append(float("nan"))
+            telea_quality.append(float("nan"))
+    endpoint["spearman"] = endpoint_quality
+    if has_heldout_columns:
+        endpoint["heldout_background_texture_spearman"] = background_quality
+        endpoint["heldout_telea_dilate3_spearman"] = telea_quality
     combined = pd.concat([frame, endpoint], ignore_index=True, sort=False)
     result_keys = ["scope", "dataset", "model", "method", "image_id"]
     if combined.duplicated(result_keys).any():

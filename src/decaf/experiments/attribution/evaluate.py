@@ -5,9 +5,10 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import tempfile
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -34,9 +35,46 @@ from decaf.experiments.attribution.plan import (
     validate_plan,
 )
 from decaf.experiments.attribution.timing import require_gpu_runtime
-from decaf.experiments.common import RunContext, atomic_json, atomic_text
+from decaf.experiments.common import (
+    RunContext,
+    TerminationRequested,
+    atomic_json,
+    atomic_text,
+)
 
 MemberEvaluator = Callable[[Mapping[str, Any], RunContext], pd.DataFrame]
+
+_HELDOUT_QUALITY_AGGREGATION = "equal_mean_of_operator_spearman"
+_HELDOUT_EFFECT_COLUMNS = (
+    "heldout_background_texture_effects",
+    "heldout_telea_dilate3_effects",
+)
+_HELDOUT_SPEARMAN_COLUMNS = (
+    "heldout_background_texture_spearman",
+    "heldout_telea_dilate3_spearman",
+)
+
+
+def _operatorwise_heldout_spearman(
+    patch_scores: Sequence[np.ndarray],
+    background_effects: Sequence[np.ndarray],
+    telea_effects: Sequence[np.ndarray],
+) -> tuple[list[float], list[float], list[float]]:
+    """Score each held-out operator first, then take their frozen equal mean."""
+
+    background_scores = [
+        float(row_spearman(patch, effects)[0])
+        for patch, effects in zip(patch_scores, background_effects, strict=True)
+    ]
+    telea_scores = [
+        float(row_spearman(patch, effects)[0])
+        for patch, effects in zip(patch_scores, telea_effects, strict=True)
+    ]
+    averaged = [
+        0.5 * (first + second)
+        for first, second in zip(background_scores, telea_scores, strict=True)
+    ]
+    return background_scores, telea_scores, averaged
 
 
 def _contained(root: Path, relative: str) -> Path:
@@ -114,7 +152,17 @@ def _configured_binding(
         raise RuntimeError(
             f"formal compute requires execution.{mapping_name} binding for one of {identities}"
         )
-    path = Path(configured).expanduser()
+    environment_match = re.fullmatch(r"\$\{([A-Z][A-Z0-9_]*)\}(?:/(.*))?", configured)
+    if environment_match is not None:
+        variable, suffix = environment_match.groups()
+        root_value = os.environ.get(variable)
+        if not root_value:
+            raise RuntimeError(f"configured runtime binding requires ${variable}")
+        path = Path(root_value).expanduser()
+        if suffix:
+            path /= suffix
+    else:
+        path = Path(configured).expanduser()
     if not path.is_absolute():
         root_value = os.environ.get(root_env_name)
         if not root_value:
@@ -185,7 +233,7 @@ def _runtime_from_manifests(
             if row.get("bytes_sha256") != scope.get("manifest_sha256"):
                 raise RuntimeError(f"dataset manifest digest drifted: {path}")
     expected_coverage = checkpoint_coverage(tuple(sorted(checkpoints_by_model)))
-    formal = str(plan.get("profile")) != "smoke"
+    formal = str(plan.get("profile_key", plan.get("profile"))) != "smoke"
     for model_id, row in checkpoints_by_model.items():
         records = row.get("checkpoints")
         checkpoint_ids = row.get("checkpoint_ids")
@@ -241,7 +289,7 @@ def _runtime_from_manifests(
 
 def _resolve_runtime_bindings(context: RunContext, plan: Mapping[str, Any]) -> dict[str, Any]:
     execution = _execution_config(context)
-    formal = str(plan.get("profile")) != "smoke"
+    formal = str(plan.get("profile_key", plan.get("profile"))) != "smoke"
     dataset_root_env = str(execution.get("dataset_root_env", "DECAF_DATA_ROOT"))
     checkpoint_root_env = str(execution.get("checkpoint_root_env", "DECAF_CACHE_ROOT"))
     data_rows: list[dict[str, Any]] = []
@@ -598,6 +646,22 @@ def _validate_member_frame(
             ):
                 raise ValueError("quality member contains failed numeric audits")
             observed = pd.to_numeric(frame["spearman"], errors="coerce").to_numpy(dtype=np.float64)
+            heldout_contract = "quality_aggregation" in frame.columns
+            if heldout_contract:
+                required_heldout = {
+                    *_HELDOUT_EFFECT_COLUMNS,
+                    *_HELDOUT_SPEARMAN_COLUMNS,
+                }
+                missing_heldout = sorted(required_heldout - set(frame.columns))
+                if missing_heldout:
+                    raise ValueError(
+                        f"held-out quality provenance is incomplete: {missing_heldout}"
+                    )
+                _constant_column(
+                    frame,
+                    "quality_aggregation",
+                    _HELDOUT_QUALITY_AGGREGATION,
+                )
             expected_quality: list[float] = []
             for row in frame.itertuples(index=False):
                 patch = _vector(row.patch_scores, name="patch_scores")
@@ -613,7 +677,29 @@ def _validate_member_frame(
                     raise ValueError("decaf_M is not the endpoint magnitude")
                 if patch.shape != target.shape:
                     raise ValueError("patch scores and quality target shapes differ")
-                expected_quality.append(float(row_spearman(patch, target)[0]))
+                if heldout_contract:
+                    operator_effects = [
+                        _vector(getattr(row, column), name=column)
+                        for column in _HELDOUT_EFFECT_COLUMNS
+                    ]
+                    if any(value.shape != patch.shape for value in operator_effects):
+                        raise ValueError("held-out operator and patch score shapes differ")
+                    operator_scores = [
+                        float(row_spearman(patch, value)[0]) for value in operator_effects
+                    ]
+                    recorded_scores = [
+                        float(getattr(row, column)) for column in _HELDOUT_SPEARMAN_COLUMNS
+                    ]
+                    if not np.allclose(
+                        recorded_scores,
+                        operator_scores,
+                        atol=1.0e-12,
+                        rtol=0.0,
+                    ):
+                        raise ValueError("held-out operator Spearman provenance drifted")
+                    expected_quality.append(float(np.mean(operator_scores)))
+                else:
+                    expected_quality.append(float(row_spearman(patch, target)[0]))
             expected_array = np.asarray(expected_quality, dtype=np.float64)
             if (
                 not np.isfinite(observed).all()
@@ -676,7 +762,7 @@ def _bind_dependency_targets(
         return frame.copy(), []
     result = frame.copy()
     endpoint_values: list[np.ndarray] | None = None
-    heldout_values: list[list[np.ndarray]] = []
+    heldout_values: dict[str, list[np.ndarray]] = {}
     records: list[dict[str, str]] = []
     for dependency in dependencies:
         target, record = _load_completed_dependency(context, dependency, jobs_by_id, runtime)
@@ -694,24 +780,52 @@ def _bind_dependency_targets(
                 raise RuntimeError("member has multiple endpoint target dependencies")
             endpoint_values = values
         elif method_id in FUNNYBIRDS_HELDOUT_METHODS:
-            heldout_values.append(values)
+            if method_id in heldout_values:
+                raise RuntimeError("member has duplicate held-out target dependencies")
+            heldout_values[method_id] = values
         else:
             raise RuntimeError(f"unknown dependency target role: {method_id}")
         records.append(record)
     if endpoint_values is None:
         raise RuntimeError("quality member has no endpoint target dependency")
     if heldout_values:
-        if len(heldout_values) != 2:
+        if set(heldout_values) != set(FUNNYBIRDS_HELDOUT_METHODS):
             raise RuntimeError("held-out quality requires exactly two target operators")
+        background_values = heldout_values["__heldout_background_texture__"]
+        telea_values = heldout_values["__heldout_telea_dilate3__"]
         quality_values: list[np.ndarray] = []
-        for first, second in zip(*heldout_values, strict=True):
+        for first, second in zip(background_values, telea_values, strict=True):
             if first.shape != second.shape:
                 raise RuntimeError("held-out target operator shapes differ")
+            # Retain the mean vector as a diagnostic/backward-compatible
+            # target column, but never use it as the metric basis: Spearman is
+            # nonlinear and the frozen study averages the two correlations.
             quality_values.append((first + second) / 2.0)
     else:
         quality_values = [value.copy() for value in endpoint_values]
     result["endpoint_effects"] = endpoint_values
     result["quality_target_effects"] = quality_values
+    result["decaf_M"] = [np.abs(value) for value in endpoint_values]
+    if "patch_scores" in result.columns:
+        patches = [_vector(value, name="patch_scores") for value in result["patch_scores"]]
+        if heldout_values:
+            background_scores, telea_scores, averaged_scores = _operatorwise_heldout_spearman(
+                patches, background_values, telea_values
+            )
+            result[_HELDOUT_EFFECT_COLUMNS[0]] = background_values
+            result[_HELDOUT_EFFECT_COLUMNS[1]] = telea_values
+            result[_HELDOUT_SPEARMAN_COLUMNS[0]] = background_scores
+            result[_HELDOUT_SPEARMAN_COLUMNS[1]] = telea_scores
+            result["quality_aggregation"] = _HELDOUT_QUALITY_AGGREGATION
+            result["quality_target_effects_role"] = (
+                "diagnostic_operator_effect_mean_not_metric_basis"
+            )
+            result["spearman"] = averaged_scores
+        else:
+            result["spearman"] = [
+                float(row_spearman(patch, target)[0])
+                for patch, target in zip(patches, quality_values, strict=True)
+            ]
     return result, records
 
 
@@ -821,6 +935,12 @@ def _completed_member(
     output_path = _contained(context.path, str(job["output_path"]))
     if not receipt_path.exists() and not output_path.exists():
         return False
+    if receipt_path.is_file():
+        receipt = load_member_receipt(receipt_path)
+        if receipt.get("status") in {"running", "failed", "skipped"}:
+            return False
+    elif output_path.exists():
+        return False
     _validate_completed_member(context, job, runtime)
     return True
 
@@ -894,16 +1014,305 @@ def run_member(
         raise
 
 
+_GPU_METHOD_ORDER = {
+    DELETION_TARGET_METHOD: 0,
+    FUNNYBIRDS_DELETION_TARGET_METHOD: 0,
+    "__heldout_background_texture__": 1,
+    "__heldout_telea_dilate3__": 2,
+    "decaf_3": 10,
+    "decaf_5": 11,
+    "decaf_9": 12,
+    "ig_16": 20,
+    "ig_32": 21,
+    "ig_u_32": 22,
+    "gradient_shap": 23,
+    "smoothgrad_16": 24,
+    "deep_lift": 25,
+    "part_occlusion": 30,
+    "exact_part_shapley": 31,
+    "rise_512": 40,
+    "kernel_shap_512": 41,
+}
+
+
+def _gpu_queue_key(job: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Keep one model resident while still preferring short receipts first."""
+
+    kind = str(job["kind"])
+    kind_order = 0 if kind in TARGET_KINDS else (2 if kind in TIMING_KINDS else 1)
+    return (
+        str(job["dataset"]),
+        str(job["model_id"]),
+        kind_order,
+        _GPU_METHOD_ORDER.get(str(job["method_id"]), 100),
+        int(job["repeat"]),
+        int(job["shard"]),
+        str(job["member_id"]),
+    )
+
+
+def _gpu_global_details(
+    plan: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    *,
+    backend: str,
+    queue_events: Sequence[Mapping[str, Any]],
+    failures: Mapping[str, str],
+) -> dict[str, Any]:
+    return {
+        "backend": backend,
+        "endpoint_m_stage": "analyze",
+        "member_count": len(plan["members"]),
+        "plan_contract_sha256": plan["plan_contract_sha256"],
+        "config_sha256": plan["config_sha256"],
+        "data_binding_manifest_sha256": runtime["data_binding_manifest_sha256"],
+        "checkpoint_binding_manifest_sha256": runtime["checkpoint_binding_manifest_sha256"],
+        "scheduler": "single_gpu_dynamic_queue",
+        "visible_device": "cuda:0",
+        "exclusive_member_concurrency": 1,
+        "dynamic_refill": True,
+        "duplicate_execution": False,
+        "queue_events": list(queue_events),
+        "failures": dict(sorted(failures.items())),
+        "multi_gpu_real_execution": "NOT_TESTED_SINGLE_GPU_NODE",
+    }
+
+
+def _compute_single_gpu_queue(
+    context: RunContext,
+    plan: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    evaluator: MemberEvaluator,
+    *,
+    backend: str,
+) -> dict[str, Any]:
+    """Run a dependency-aware, failure-isolating queue at concurrency one."""
+
+    jobs = [dict(job) for job in plan["members"]]
+    jobs_by_id = {str(job["member_id"]): job for job in jobs}
+    expected = [str(job["member_id"]) for job in jobs]
+    receipts: dict[str, dict[str, Any]] = {}
+    successful: set[str] = set()
+    statuses = Counter()
+    failures: dict[str, str] = {}
+    events: list[dict[str, Any]] = []
+    pending: dict[str, dict[str, Any]] = {}
+
+    for job in jobs:
+        member_id = str(job["member_id"])
+        if context.resume and _completed_member(context, job, runtime):
+            receipt_path = _contained(context.path, str(job["receipt_path"]))
+            receipts[member_id] = load_member_receipt(receipt_path)
+            successful.add(member_id)
+            statuses["skipped"] += 1
+            events.append({"member_id": member_id, "event": "resume_skip", "device": 0})
+        else:
+            pending[member_id] = job
+
+    interrupted: BaseException | None = None
+    while pending and interrupted is None:
+        ready: list[dict[str, Any]] = []
+        blocked_by_failure: list[tuple[dict[str, Any], list[str]]] = []
+        for job in pending.values():
+            dependencies = [str(value["member_id"]) for value in job.get("depends_on", [])]
+            failed_dependencies = [value for value in dependencies if value in failures]
+            if failed_dependencies:
+                blocked_by_failure.append((job, failed_dependencies))
+            elif all(value in successful for value in dependencies):
+                ready.append(job)
+
+        for job, dependencies in blocked_by_failure:
+            member_id = str(job["member_id"])
+            error = f"dependency members failed: {dependencies}"
+            receipt_path = _contained(context.path, str(job["receipt_path"]))
+            write_member_receipt(
+                receipt_path,
+                member_id,
+                "failed",
+                error=f"RuntimeError: {error}",
+            )
+            receipts[member_id] = load_member_receipt(receipt_path)
+            failures[member_id] = error
+            statuses["failed"] += 1
+            events.append(
+                {
+                    "member_id": member_id,
+                    "event": "dependency_failure_isolated",
+                    "device": 0,
+                }
+            )
+            pending.pop(member_id)
+
+        if not ready:
+            if pending and not blocked_by_failure:
+                unresolved = sorted(pending)
+                interrupted = RuntimeError(
+                    f"single-GPU queue has an unresolved dependency cycle: {unresolved}"
+                )
+            continue
+
+        job = min(ready, key=_gpu_queue_key)
+        member_id = str(job["member_id"])
+        events.append({"member_id": member_id, "event": "start", "device": 0})
+        try:
+            status, receipt = run_member(
+                context,
+                job,
+                evaluator,
+                jobs_by_id=jobs_by_id,
+                runtime=runtime,
+            )
+        except TerminationRequested as error:
+            receipt_path = _contained(context.path, str(job["receipt_path"]))
+            if receipt_path.is_file():
+                receipts[member_id] = load_member_receipt(receipt_path)
+            failures[member_id] = str(error)
+            statuses["failed"] += 1
+            events.append({"member_id": member_id, "event": "terminated", "device": 0})
+            pending.pop(member_id)
+            interrupted = error
+        except Exception as error:
+            receipt_path = _contained(context.path, str(job["receipt_path"]))
+            if receipt_path.is_file():
+                receipts[member_id] = load_member_receipt(receipt_path)
+            message = f"{type(error).__name__}: {error}"
+            failures[member_id] = message
+            statuses["failed"] += 1
+            events.append({"member_id": member_id, "event": "failure_isolated", "device": 0})
+            pending.pop(member_id)
+        else:
+            receipts[member_id] = receipt
+            successful.add(member_id)
+            statuses[status] += 1
+            events.append({"member_id": member_id, "event": status, "device": 0})
+            pending.pop(member_id)
+
+    global_path = context.path / "receipts/compute_members.json"
+    finalize_global_receipt(
+        global_path,
+        context.path.name,
+        receipts,
+        expected_members=expected,
+        details=_gpu_global_details(
+            plan,
+            runtime,
+            backend=backend,
+            queue_events=events,
+            failures=failures,
+        ),
+    )
+    if interrupted is not None:
+        raise interrupted
+    if failures:
+        raise RuntimeError(
+            f"{len(failures)} attribution members failed in isolation; see {global_path}"
+        )
+    return {
+        "backend": backend,
+        "completed_members": statuses["completed"],
+        "resumed_members": statuses["skipped"],
+        "failed_members": statuses["failed"],
+        "member_count": len(expected),
+        "scheduler": "single_gpu_dynamic_queue",
+        "device": 0,
+    }
+
+
+def _finalize_gpu_queue_after_termination(
+    context: RunContext,
+    plan: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    *,
+    backend: str,
+    error: TerminationRequested,
+) -> None:
+    """Close queue receipts if SIGTERM lands outside an active member call."""
+
+    global_path = context.path / "receipts/compute_members.json"
+    if global_path.is_file():
+        try:
+            current = json.loads(global_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = {}
+        if current.get("all_processes_exited") is True and current.get("status") != "running":
+            return
+
+    receipts: dict[str, dict[str, Any]] = {}
+    failures: dict[str, str] = {}
+    for job in plan["members"]:
+        member_id = str(job["member_id"])
+        receipt_path = _contained(context.path, str(job["receipt_path"]))
+        if not receipt_path.is_file():
+            continue
+        receipt = load_member_receipt(receipt_path)
+        if receipt.get("status") == "running":
+            message = f"{type(error).__name__}: {error}"
+            write_member_receipt(
+                receipt_path,
+                member_id,
+                "failed",
+                started_at=str(receipt["started_at"]),
+                error=message,
+            )
+            receipt = load_member_receipt(receipt_path)
+            failures[member_id] = message
+        elif receipt.get("status") == "failed":
+            failures[member_id] = str(receipt.get("error") or "member failed")
+        receipts[member_id] = receipt
+
+    finalize_global_receipt(
+        global_path,
+        context.path.name,
+        receipts,
+        expected_members=[str(job["member_id"]) for job in plan["members"]],
+        details=_gpu_global_details(
+            plan,
+            runtime,
+            backend=backend,
+            queue_events=[
+                {
+                    "event": "sigterm_terminalize",
+                    "device": 0,
+                    "error": f"{type(error).__name__}: {error}",
+                }
+            ],
+            failures=failures,
+        ),
+    )
+
+
 def compute(context: RunContext) -> dict[str, Any]:
     """Execute resumable members through the oracle or a lazily loaded GPU adapter."""
 
     if not (context.path / "manifests/plan.json").is_file():
-        raise RuntimeError("attribution compute requires a persisted prepare-stage plan")
+        if context.profile == "smoke-resume" and context.stage == "compute":
+            prepare(context)
+        else:
+            raise RuntimeError("attribution compute requires a persisted prepare-stage plan")
     plan = _plan(context)
     runtime = _resolve_runtime_bindings(context, plan)
     execution = context.config.get("execution", {})
     backend = execution.get("backend", "gpu") if isinstance(execution, Mapping) else "gpu"
     evaluator = oracle_member if backend == "oracle" else _load_adapter(context.config)
+    scheduler = execution.get("scheduler") if isinstance(execution, Mapping) else None
+    if backend != "oracle" and scheduler == "single_gpu_dynamic_queue":
+        try:
+            return _compute_single_gpu_queue(
+                context,
+                plan,
+                runtime,
+                evaluator,
+                backend=str(backend),
+            )
+        except TerminationRequested as error:
+            _finalize_gpu_queue_after_termination(
+                context,
+                plan,
+                runtime,
+                backend=str(backend),
+                error=error,
+            )
+            raise
     statuses = Counter()
     receipts: dict[str, dict[str, Any]] = {}
     jobs_by_id = {str(job["member_id"]): job for job in plan["members"]}

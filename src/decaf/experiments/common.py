@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
-import signal
 import shutil
+import signal
 import sys
 import tempfile
 import time
@@ -18,6 +19,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+# Keep the GPU verifier importable under its pinned Python 3.10 environment.
+# Ruff targets the public Python 3.11 package and would otherwise require
+# ``datetime.UTC``, which does not exist in that runtime.
+UTC_TIMEZONE = getattr(__import__("datetime"), "UTC", timezone.utc)  # noqa: UP017
 
 VALID_STAGES = ("prepare", "compute", "analyze", "paper", "all")
 TERMINAL_STATUSES = (
@@ -42,7 +48,8 @@ def parse_devices(value: str) -> tuple[int, ...]:
     try:
         devices = tuple(int(part) for part in raw)
     except ValueError as error:
-        raise argparse.ArgumentTypeError("devices must be a comma-separated list of integers") from error
+        message = "devices must be a comma-separated list of integers"
+        raise argparse.ArgumentTypeError(message) from error
     if any(device < 0 for device in devices) or len(devices) != len(set(devices)):
         raise argparse.ArgumentTypeError("devices must contain unique non-negative integers")
     return devices
@@ -51,7 +58,11 @@ def parse_devices(value: str) -> tuple[int, ...]:
 def utc_now() -> str:
     """Return a stable UTC timestamp."""
 
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC_TIMEZONE).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _utc_now_precise() -> str:
+    return datetime.now(UTC_TIMEZONE).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def repository_root() -> Path:
@@ -190,7 +201,7 @@ def default_output(experiment: str, run_id: str) -> Path:
 def make_run_id(experiment: str, profile: str) -> str:
     """Create a sortable run identifier."""
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC_TIMEZONE).strftime("%Y%m%dT%H%M%SZ")
     return f"{experiment}-{profile}-{stamp}"
 
 
@@ -347,6 +358,138 @@ def requested_stages(stage: str) -> tuple[str, ...]:
     return ("prepare", "compute", "analyze", "paper") if stage == "all" else (stage,)
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _resume_artifact_inventory(context: RunContext) -> list[dict[str, Any]]:
+    """Bind the immutable run evidence checked by a resume validator.
+
+    Lifecycle files rewritten by opening/closing a resumed CLI invocation are
+    deliberately excluded.  Resume receipts are excluded so later stage
+    validations do not invalidate the earlier compute proof.
+    """
+
+    volatile = {"config.yaml", "environment.json", "run.json"}
+    records: list[dict[str, Any]] = []
+    for path in sorted(context.path.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        relative = path.relative_to(context.path).as_posix()
+        if (
+            relative in volatile
+            or relative.startswith("logs/")
+            or relative.startswith("receipts/resume/")
+        ):
+            continue
+        records.append(
+            {
+                "path": relative,
+                "size_bytes": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+        )
+    if not records:
+        raise RuntimeError("resume validation produced an empty artifact inventory")
+    return records
+
+
+def _compute_member_inventory(context: RunContext) -> list[dict[str, str]] | None:
+    """Return the canonical member-output inventory when a plan exposes it."""
+
+    plan_path = context.path / "manifests" / "plan.json"
+    if not plan_path.is_file():
+        return None
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    members = plan.get("members") if isinstance(plan, Mapping) else None
+    if not isinstance(members, list) or not members:
+        return None
+    records: list[dict[str, str]] = []
+    for raw in sorted(
+        members,
+        key=lambda value: str(value.get("member_id", "")) if isinstance(value, Mapping) else "",
+    ):
+        if not isinstance(raw, Mapping):
+            return None
+        member_id = raw.get("member_id")
+        output_value = raw.get("output_path")
+        receipt_value = raw.get("receipt_path")
+        identities = (member_id, output_value, receipt_value)
+        if not all(isinstance(value, str) and value for value in identities):
+            return None
+        output_path = context.path / str(output_value)
+        receipt_path = context.path / str(receipt_value)
+        if not output_path.is_file() or not receipt_path.is_file():
+            raise FileNotFoundError(f"resumed compute member is incomplete: {member_id}")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        details = receipt.get("details") if isinstance(receipt, Mapping) else None
+        if (
+            receipt.get("status") != "completed"
+            or receipt.get("member_id") != member_id
+            or not isinstance(details, Mapping)
+            or details.get("output_path") != output_value
+            or details.get("output_sha256") != _sha256_file(output_path)
+        ):
+            raise RuntimeError(f"resumed compute member lineage drifted: {member_id}")
+        records.append(
+            {
+                "member_id": str(member_id),
+                "output_path": str(output_value),
+                "output_sha256": str(details["output_sha256"]),
+                "receipt_path": str(receipt_value),
+            }
+        )
+    return records
+
+
+def _record_resume_validation(
+    context: RunContext,
+    stage: str,
+    *,
+    started_at: str,
+    details: Mapping[str, Any] | None,
+) -> None:
+    source_receipt = context.stage_receipt(stage)
+    if not source_receipt.is_file():
+        raise FileNotFoundError(f"resumed {stage} stage has no source receipt")
+    inventory: list[dict[str, Any]] = (
+        _compute_member_inventory(context) if stage == "compute" else None
+    ) or _resume_artifact_inventory(context)
+    encoded_inventory = json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    validation_details = dict(details or {})
+    raw_member_count = validation_details.get("member_count", 0)
+    member_count = int(raw_member_count) if raw_member_count is not None else 0
+    if member_count < 0:
+        raise ValueError("resume validator returned a negative member count")
+    atomic_json(
+        context.path / "receipts" / "resume" / f"{stage}.json",
+        {
+            "schema_version": 1,
+            "stage": stage,
+            "status": "completed",
+            "validation_started_at": started_at,
+            "validation_finished_at": _utc_now_precise(),
+            "member_count": member_count,
+            "resumed_members": member_count,
+            "reexecuted": 0,
+            "source_compute_receipt_sha256": (
+                _sha256_file(source_receipt) if stage == "compute" else None
+            ),
+            "source_stage_receipt_sha256": _sha256_file(source_receipt),
+            "artifact_inventory": inventory,
+            "artifact_inventory_sha256": hashlib.sha256(encoded_inventory).hexdigest(),
+            "validator_details": validation_details,
+        },
+    )
+
+
 def execute_run(
     context: RunContext,
     handlers: Mapping[str, StageHandler],
@@ -367,7 +510,14 @@ def execute_run(
             if context.resume and context.stage_completed(stage):
                 validator = (resume_validators or {}).get(stage)
                 if validator is not None:
-                    validator(context)
+                    validation_started_at = _utc_now_precise()
+                    details = validator(context)
+                    _record_resume_validation(
+                        context,
+                        stage,
+                        started_at=validation_started_at,
+                        details=details,
+                    )
                 completed.append(stage)
                 continue
             handler = handlers.get(stage)

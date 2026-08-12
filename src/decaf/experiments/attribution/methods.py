@@ -87,6 +87,32 @@ LARGE_MODEL_METHODS = (
     "ig_32",
     "smoothgrad_16",
 )
+VERIFY_MAIN_METHODS = (
+    "decaf_3",
+    "decaf_5",
+    "decaf_9",
+    "deep_lift",
+    "ig_32",
+    "ig_u_32",
+    "gradient_shap",
+    "smoothgrad_16",
+    "rise_512",
+    "kernel_shap_512",
+)
+VERIFY_RESUME_METHODS = (
+    "decaf_3",
+    "ig_32",
+    "rise_512",
+    "kernel_shap_512",
+)
+VERIFY_LARGE_MODEL_METHODS = LARGE_MODEL_METHODS
+VERIFY_BOUNDARY_METHODS = (
+    "decaf_5",
+    "ig_32",
+    "part_occlusion",
+    "kernel_shap_512",
+    "exact_part_shapley",
+)
 BOUNDARY_METHODS = (
     "decaf_3",
     "decaf_5",
@@ -159,6 +185,10 @@ __all__ = [
     "MAIN_METHODS",
     "METHODS",
     "MethodSpec",
+    "VERIFY_BOUNDARY_METHODS",
+    "VERIFY_LARGE_MODEL_METHODS",
+    "VERIFY_MAIN_METHODS",
+    "VERIFY_RESUME_METHODS",
     "decaf_trajectory",
     "get_method",
     "validate_compute_methods",

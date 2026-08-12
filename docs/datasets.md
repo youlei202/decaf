@@ -36,6 +36,14 @@ manifest precedes sealing; 768 is the actual paper deep-pair plan. The
 class-mapping and class-name files are fingerprinted in the YAML manifest.
 Image files remain subject to their upstream terms.
 
+For the gated single-B200 shard, `DECAF_DATA_ROOT` points to the prepared
+ImageNet-9 data root containing `manifests/paired_variants.parquet`; the official
+1,000-to-9 mapping may be selected explicitly with `DECAF_IMAGENET9_MAPPING`.
+Controlled binds the two processed arrays directly through
+`DECAF_CONTROLLED_IMAGES_32_UINT8` and
+`DECAF_CONTROLLED_FACTOR_INDICES`; both complete arrays are hashed and their
+shape, dtype, and row-major factor identity are validated.
+
 ### FunnyBirds
 
 The source repository is pinned to revision
@@ -62,6 +70,12 @@ revision `f4bf3df88b126d3a2d5e8671a8c2ea90de39638e`. Its expected size is
 `9719778db7a7f589af94de4d7e4a025b832835502df370154f7c0a8b35466090`.
 The paper path validates 72,240 used archive members through the frozen subset
 and part-group manifests.
+
+Attribution B200 profiles require explicit dataset manifests through
+`DECAF_FUNNYBIRDS_MANIFEST`, `DECAF_IDSDS_MANIFEST`, and
+`DECAF_PARTIMAGENET_MANIFEST`, together with their respective source-root
+variables. The manifests select fixed real common support and semantic masks;
+directory discovery or synthetic substitution is not accepted.
 
 ### Covertype
 

@@ -71,6 +71,26 @@ ImageNet training, they are treated as restricted/manual and are not
 redistributed. FunnyBirds model hashes are frozen, but their immutable public
 download locations were not; they are also manual inputs.
 
+## Single-B200 checkpoint bindings
+
+The gated verification profiles accept exact files through environment
+variables and verify their hashes before deserialization. Controlled uses
+`DECAF_CONTROLLED_B200_CHECKPOINT_MANIFEST`; that external manifest enumerates
+the four behavior cases and selects exactly one ResNet-18 and one Small-ViT for
+fingerprinting. ImageNet-9 uses
+`DECAF_IMAGENET9_PRETRAINED_RESNET18`,
+`DECAF_IMAGENET9_FINETUNED_CNN`, and
+`DECAF_IMAGENET9_FINETUNED_TRANSFORMER`, with cache-root resolution available
+for the registered relative names.
+
+Attribution uses `DECAF_CHECKPOINT_` followed by the registered uppercase ID:
+`FUNNYBIRDS_RESNET50`, `FUNNYBIRDS_VGG16`, `FUNNYBIRDS_VIT_B16`,
+`IDSDS_RESNET50`, `IDSDS_VGG16`, `IDSDS_VIT_B16`,
+`TORCHVISION_RESNET50`, `DINOV2_VITG14_BACKBONE`, and
+`DINOV2_VITG14_HEAD`. These variables are path bindings, not download URLs.
+The DINOv2 backbone and linear head are both required and independently hashed.
+No checkpoint file is copied into an experiment run or public release.
+
 ## Covertype family
 
 The paper grid generates 135 joblib checkpoints: 90 causal-direction models and

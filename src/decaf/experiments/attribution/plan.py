@@ -16,6 +16,10 @@ from decaf.experiments.attribution.methods import (
     FUNNYBIRDS_SUPPLEMENT_METHODS,
     LARGE_MODEL_METHODS,
     MAIN_METHODS,
+    VERIFY_BOUNDARY_METHODS,
+    VERIFY_LARGE_MODEL_METHODS,
+    VERIFY_MAIN_METHODS,
+    VERIFY_RESUME_METHODS,
     get_method,
 )
 from decaf.experiments.attribution.models import (
@@ -33,6 +37,9 @@ FULL_MANIFEST_SHA256 = "bad5c0fe0df455bce6a5172233cd0cd549c562ee006e549bf2d7142f
 TIMING_MANIFEST_SHA256 = "6c4f6d6b5bbe83d6d5ac9b9558dc97f844a2f2f2d4c77d1fc0db18a1505f8bd4"
 FUNNYBIRDS_SUPPORT_SHA256 = "19ae0c0766857ebb7f0ea09ae24f28ad97b322f2cd9a45325184ade43b7ed1ac"
 PARTIMAGENET_MANIFEST_SHA256 = "d1198f5a06bd4ef9656473a047fe4e01ddabf2a76f5868dfa7ee6579ae710657"
+FUNNYBIRDS_STUDY_MANIFEST_SHA256 = (
+    "bc4d1c647fd0f5ab6611bacfa5a558e15b246916cee037ca80cc6b056d890f2c"
+)
 DELETION_TARGET_METHOD = "__deletion_targets__"
 FUNNYBIRDS_DELETION_TARGET_METHOD = "__part_deletion_targets__"
 FUNNYBIRDS_HELDOUT_METHODS = (
@@ -80,6 +87,150 @@ SCOPES: dict[str, ScopeSpec] = {
         None,
         "cpu_score_oracle",
         1,
+    ),
+    "smoke_idsds_deletion_targets": ScopeSpec(
+        "smoke_idsds_deletion_targets",
+        "imagenet1k_idsds",
+        IDSDS_MODELS,
+        (DELETION_TARGET_METHOD,),
+        1,
+        1,
+        8,
+        PRIMARY_MANIFEST_SHA256,
+        "shared_deletion_targets",
+        3,
+    ),
+    "smoke_idsds_primary": ScopeSpec(
+        "smoke_idsds_primary",
+        "imagenet1k_idsds",
+        IDSDS_MODELS,
+        VERIFY_MAIN_METHODS,
+        1,
+        1,
+        8,
+        PRIMARY_MANIFEST_SHA256,
+        "quality",
+        30,
+    ),
+    "smoke_funnybirds_deletion_targets": ScopeSpec(
+        "smoke_funnybirds_deletion_targets",
+        "funnybirds",
+        FUNNYBIRDS_MODELS,
+        (FUNNYBIRDS_DELETION_TARGET_METHOD,),
+        1,
+        1,
+        8,
+        FUNNYBIRDS_STUDY_MANIFEST_SHA256,
+        "shared_part_deletion_targets",
+        3,
+    ),
+    "smoke_funnybirds_heldout_targets": ScopeSpec(
+        "smoke_funnybirds_heldout_targets",
+        "funnybirds",
+        FUNNYBIRDS_MODELS,
+        FUNNYBIRDS_HELDOUT_METHODS,
+        1,
+        1,
+        8,
+        FUNNYBIRDS_STUDY_MANIFEST_SHA256,
+        "shared_heldout_targets",
+        6,
+    ),
+    "smoke_funnybirds_primary": ScopeSpec(
+        "smoke_funnybirds_primary",
+        "funnybirds",
+        FUNNYBIRDS_MODELS,
+        VERIFY_MAIN_METHODS,
+        1,
+        1,
+        8,
+        FUNNYBIRDS_STUDY_MANIFEST_SHA256,
+        "quality",
+        30,
+    ),
+    "resume_idsds_deletion_targets": ScopeSpec(
+        "resume_idsds_deletion_targets",
+        "imagenet1k_idsds",
+        ("resnet50",),
+        (DELETION_TARGET_METHOD,),
+        1,
+        1,
+        8,
+        PRIMARY_MANIFEST_SHA256,
+        "shared_deletion_targets",
+        1,
+    ),
+    "resume_idsds_primary": ScopeSpec(
+        "resume_idsds_primary",
+        "imagenet1k_idsds",
+        ("resnet50",),
+        VERIFY_RESUME_METHODS,
+        1,
+        1,
+        8,
+        PRIMARY_MANIFEST_SHA256,
+        "quality",
+        4,
+    ),
+    "smoke_dinov2_g_quality": ScopeSpec(
+        "smoke_dinov2_g_quality",
+        "imagenet1k_idsds",
+        (LARGE_MODEL,),
+        VERIFY_LARGE_MODEL_METHODS,
+        1,
+        1,
+        8,
+        PRIMARY_MANIFEST_SHA256,
+        "large_model_quality",
+        8,
+    ),
+    "smoke_dinov2_g_timing": ScopeSpec(
+        "smoke_dinov2_g_timing",
+        "imagenet1k_idsds",
+        (LARGE_MODEL,),
+        VERIFY_LARGE_MODEL_METHODS,
+        1,
+        1,
+        8,
+        PRIMARY_MANIFEST_SHA256,
+        "large_model_timing",
+        8,
+    ),
+    "smoke_partimagenet_deletion_targets": ScopeSpec(
+        "smoke_partimagenet_deletion_targets",
+        "partimagenet",
+        ("resnet50",),
+        (FUNNYBIRDS_DELETION_TARGET_METHOD,),
+        1,
+        1,
+        8,
+        PARTIMAGENET_MANIFEST_SHA256,
+        "shared_part_deletion_targets",
+        1,
+    ),
+    "smoke_partimagenet_heldout_targets": ScopeSpec(
+        "smoke_partimagenet_heldout_targets",
+        "partimagenet",
+        ("resnet50",),
+        FUNNYBIRDS_HELDOUT_METHODS,
+        1,
+        1,
+        8,
+        PARTIMAGENET_MANIFEST_SHA256,
+        "shared_heldout_targets",
+        2,
+    ),
+    "smoke_partimagenet_boundary": ScopeSpec(
+        "smoke_partimagenet_boundary",
+        "partimagenet",
+        ("resnet50",),
+        VERIFY_BOUNDARY_METHODS,
+        1,
+        1,
+        8,
+        PARTIMAGENET_MANIFEST_SHA256,
+        "boundary_quality",
+        5,
     ),
     "idsds_deletion_targets": ScopeSpec(
         "idsds_deletion_targets",
@@ -285,10 +436,52 @@ PROFILE_SCOPES: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# These deliberately small profiles exercise the real offline CUDA path.  They
+# are separate from the paper-scale contracts above so the existing static plan
+# remains byte-for-byte interpretable as a full-compute declaration.
+VERIFICATION_PROFILE_SCOPES: dict[str, tuple[str, ...]] = {
+    "smoke-b200": (
+        "smoke_idsds_deletion_targets",
+        "smoke_idsds_primary",
+        "smoke_funnybirds_deletion_targets",
+        "smoke_funnybirds_heldout_targets",
+        "smoke_funnybirds_primary",
+    ),
+    "large-model-smoke": (
+        "smoke_dinov2_g_quality",
+        "smoke_dinov2_g_timing",
+    ),
+    "boundary-smoke": (
+        "smoke_partimagenet_deletion_targets",
+        "smoke_partimagenet_heldout_targets",
+        "smoke_partimagenet_boundary",
+    ),
+    "smoke-resume": (
+        "resume_idsds_deletion_targets",
+        "resume_idsds_primary",
+    ),
+}
+
 PROFILE_MEMBER_COUNTS = {
     profile: sum(SCOPES[name].expected_members for name in names)
     for profile, names in PROFILE_SCOPES.items()
 }
+VERIFICATION_PROFILE_MEMBER_COUNTS = {
+    profile: sum(SCOPES[name].expected_members for name in names)
+    for profile, names in VERIFICATION_PROFILE_SCOPES.items()
+}
+
+
+def _profile_key(config: Mapping[str, Any]) -> str:
+    """Resolve the opt-in real-GPU variant while preserving default smoke."""
+
+    profile = str(config.get("profile", ""))
+    execution = config.get("execution", {})
+    if not isinstance(execution, Mapping):
+        raise TypeError("attribution execution configuration must be a mapping")
+    if profile == "smoke" and execution.get("verification_profile") == "single_b200":
+        return "smoke-b200"
+    return profile
 
 
 def canonical_sha256(payload: Any) -> str:
@@ -322,6 +515,10 @@ def _dependency_specs(
     targets: tuple[tuple[str, str], ...]
     if scope == "idsds_primary":
         targets = (("idsds_deletion_targets", DELETION_TARGET_METHOD),)
+    elif scope == "smoke_idsds_primary":
+        targets = (("smoke_idsds_deletion_targets", DELETION_TARGET_METHOD),)
+    elif scope == "resume_idsds_primary":
+        targets = (("resume_idsds_deletion_targets", DELETION_TARGET_METHOD),)
     elif scope == "idsds_full50k":
         targets = (("idsds_full50k_deletion_targets", DELETION_TARGET_METHOD),)
     elif scope in {"funnybirds_primary", "funnybirds_supplement"}:
@@ -330,11 +527,23 @@ def _dependency_specs(
             ("funnybirds_heldout_targets", "__heldout_background_texture__"),
             ("funnybirds_heldout_targets", "__heldout_telea_dilate3__"),
         )
+    elif scope == "smoke_funnybirds_primary":
+        targets = (
+            ("smoke_funnybirds_deletion_targets", FUNNYBIRDS_DELETION_TARGET_METHOD),
+            ("smoke_funnybirds_heldout_targets", "__heldout_background_texture__"),
+            ("smoke_funnybirds_heldout_targets", "__heldout_telea_dilate3__"),
+        )
     elif scope == "partimagenet_boundary":
         targets = (
             ("partimagenet_deletion_targets", FUNNYBIRDS_DELETION_TARGET_METHOD),
             ("partimagenet_heldout_targets", "__heldout_background_texture__"),
             ("partimagenet_heldout_targets", "__heldout_telea_dilate3__"),
+        )
+    elif scope == "smoke_partimagenet_boundary":
+        targets = (
+            ("smoke_partimagenet_deletion_targets", FUNNYBIRDS_DELETION_TARGET_METHOD),
+            ("smoke_partimagenet_heldout_targets", "__heldout_background_texture__"),
+            ("smoke_partimagenet_heldout_targets", "__heldout_telea_dilate3__"),
         )
     else:
         return []
@@ -409,7 +618,12 @@ def _bind_members(
 
 
 def _model_image_count(scope: ScopeSpec, model: str) -> int:
-    if scope.dataset == "funnybirds":
+    if scope.name in {
+        "funnybirds_supplement",
+        "funnybirds_deletion_targets",
+        "funnybirds_heldout_targets",
+        "funnybirds_primary",
+    }:
         counts = {
             "funnybirds_resnet50": 499,
             "funnybirds_vgg16": 497,
@@ -491,15 +705,19 @@ def build_plan(config: Mapping[str, Any]) -> dict[str, Any]:
     """Build and strictly validate one static experiment plan."""
 
     profile = str(config.get("profile", ""))
-    if profile not in PROFILE_SCOPES:
+    profile_key = _profile_key(config)
+    all_profile_scopes = {**PROFILE_SCOPES, **VERIFICATION_PROFILE_SCOPES}
+    all_member_counts = {**PROFILE_MEMBER_COUNTS, **VERIFICATION_PROFILE_MEMBER_COUNTS}
+    if profile_key not in all_profile_scopes:
         raise ValueError(f"unknown attribution profile: {profile}")
     plan_config = config.get("plan", {})
     if plan_config is not None and not isinstance(plan_config, Mapping):
         raise TypeError("attribution plan configuration must be a mapping")
-    configured = tuple((plan_config or {}).get("include", PROFILE_SCOPES[profile]))
-    if configured != PROFILE_SCOPES[profile]:
+    configured = tuple((plan_config or {}).get("include", all_profile_scopes[profile_key]))
+    if configured != all_profile_scopes[profile_key]:
         raise ValueError(
-            f"profile {profile} scope contract drifted: {configured} != {PROFILE_SCOPES[profile]}"
+            f"profile {profile_key} scope contract drifted: "
+            f"{configured} != {all_profile_scopes[profile_key]}"
         )
     selected = tuple(SCOPES[name] for name in configured)
     members = [member for scope in selected for member in _scope_members(scope)]
@@ -508,6 +726,7 @@ def build_plan(config: Mapping[str, Any]) -> dict[str, Any]:
         "schema_version": 1,
         "experiment": "attribution",
         "profile": profile,
+        "profile_key": profile_key,
         "scope_names": list(configured),
         "scopes": [_scope_dict(scope) for scope in selected],
         "endpoint_m_stage": "analyze",
@@ -522,11 +741,12 @@ def build_plan(config: Mapping[str, Any]) -> dict[str, Any]:
     execution = config.get("execution", {})
     if not isinstance(execution, Mapping):
         raise TypeError("attribution execution configuration must be a mapping")
-    formal = profile != "smoke"
+    formal = profile_key != "smoke"
     plan: dict[str, Any] = {
         "schema_version": 1,
         "experiment": "attribution",
         "profile": profile,
+        "profile_key": profile_key,
         "config_sha256": config_sha256,
         "plan_contract": plan_contract,
         "plan_contract_sha256": plan_contract_sha256,
@@ -562,7 +782,7 @@ def build_plan(config: Mapping[str, Any]) -> dict[str, Any]:
         "scopes": [_scope_dict(scope) for scope in selected],
         "members": members,
         "member_count": len(members),
-        "expected_member_count": PROFILE_MEMBER_COUNTS[profile],
+        "expected_member_count": all_member_counts[profile_key],
         "contracts": {
             "idsds_primary_members": 780,
             "idsds_full50k_members": 900,
@@ -579,7 +799,7 @@ def build_plan(config: Mapping[str, Any]) -> dict[str, Any]:
             "large_model_methods": 8,
             "aligned_architectures": 3,
         },
-        "available_profiles": list(PROFILE_SCOPES),
+        "available_profiles": list((*PROFILE_SCOPES, *VERIFICATION_PROFILE_SCOPES)),
     }
     plan["audit"] = validate_plan(plan, raise_on_error=True)
     return plan
@@ -590,11 +810,14 @@ def validate_plan(plan: Mapping[str, Any], *, raise_on_error: bool = False) -> d
 
     errors: list[str] = []
     profile = str(plan.get("profile", ""))
+    profile_key = str(plan.get("profile_key", profile))
+    all_profile_scopes = {**PROFILE_SCOPES, **VERIFICATION_PROFILE_SCOPES}
+    all_member_counts = {**PROFILE_MEMBER_COUNTS, **VERIFICATION_PROFILE_MEMBER_COUNTS}
     members_value = plan.get("members")
     members = members_value if isinstance(members_value, list) else []
-    if profile not in PROFILE_SCOPES:
-        errors.append(f"unknown profile:{profile}")
-    expected_total = PROFILE_MEMBER_COUNTS.get(profile)
+    if profile_key not in all_profile_scopes:
+        errors.append(f"unknown profile:{profile_key}")
+    expected_total = all_member_counts.get(profile_key)
     if expected_total is not None and len(members) != expected_total:
         errors.append(f"member_count:{len(members)}!={expected_total}")
     if plan.get("endpoint_m_stage") != "analyze":
@@ -614,7 +837,7 @@ def validate_plan(plan: Mapping[str, Any], *, raise_on_error: bool = False) -> d
     execution_contract = plan.get("execution_contract")
     if not isinstance(execution_contract, Mapping):
         errors.append("execution_contract")
-    elif profile != "smoke" and (
+    elif profile_key != "smoke" and (
         execution_contract.get("backend") != "external_gpu_worker"
         or execution_contract.get("execution_claimed") is not False
         or execution_contract.get("requires_gpu") is not True
@@ -750,6 +973,8 @@ def validate_plan(plan: Mapping[str, Any], *, raise_on_error: bool = False) -> d
         "endpoint_m_generated_in_analyze": plan.get("endpoint_m_stage") == "analyze",
         "large_model_profile_present": "large-model" in PROFILE_SCOPES,
         "boundary_profile_present": "boundary" in PROFILE_SCOPES,
+        "single_b200_profiles_present": set(VERIFICATION_PROFILE_SCOPES)
+        == {"smoke-b200", "large-model-smoke", "boundary-smoke", "smoke-resume"},
     }
     if errors and raise_on_error:
         raise AssertionError(f"attribution plan audit failed: {result}")
@@ -762,6 +987,8 @@ __all__ = [
     "FUNNYBIRDS_HELDOUT_METHODS",
     "PROFILE_MEMBER_COUNTS",
     "PROFILE_SCOPES",
+    "VERIFICATION_PROFILE_MEMBER_COUNTS",
+    "VERIFICATION_PROFILE_SCOPES",
     "SCOPES",
     "ScopeSpec",
     "build_plan",

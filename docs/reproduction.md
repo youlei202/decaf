@@ -69,6 +69,32 @@ bash scripts/reproduce/covertype.sh --stage all --profile smoke --output "$DECAF
 Smoke outputs prove that the local stack works. They are not substitutes for
 paper-profile estimates and must not be compared to headline tolerances.
 
+### Representative real single-B200 shards
+
+The release-verification path is deliberately gated so ordinary CPU smoke runs
+remain lightweight. After supplying all licensed assets by environment variable,
+select the persistent CUDA interpreter and the one physical device:
+
+```bash
+export DECAF_B200_VERIFY=1
+export DECAF_GPU_PYTHON=/path/to/gpu-python
+export CUDA_VISIBLE_DEVICES=0
+```
+
+Run controlled and ImageNet-9 with `--profile smoke`. Attribution additionally
+provides `large-model-smoke` for DINOv2 ViT-g/14, `boundary-smoke` for
+PartImageNet, and `smoke-resume` for normal-SIGTERM fault injection. Every
+command accepts `--devices 0`; rerunning the identical command with `--resume`
+revalidates member inputs and artifact hashes before it skips work. The
+ImageNet-9 shard retains 16 source pairs per model, both Same-Rand and
+Same-Next, and the registered baseline budgets. Attribution retains the formal
+512-query definitions for RISE and KernelSHAP while reducing only image count.
+
+The B200 path never searches the network. A missing source tree, dataset
+manifest, checkpoint, mapping, or byte digest is a terminal error. See
+`docs/checkpoints.md` and the checked-in smoke configurations for the exact
+environment-variable names.
+
 ## Real Covertype CPU integration
 
 The release gate is separate from the synthetic Covertype smoke profile. Place
@@ -165,8 +191,10 @@ bash scripts/reproduce/imagenet9.sh --stage analyze --profile paper --output "$I
 bash scripts/reproduce/imagenet9.sh --stage paper --profile paper --output "$I9_RUN" --resume
 ~~~
 
-Until that external worker is run on provisioned GPUs, ImageNet-9 real-shard
-verification remains pending by design.
+Until that external worker is run on provisioned GPUs, ImageNet-9 paper-profile
+execution remains pending by design. The gated single-B200 smoke runner
+described above is an independent compute-path verification and does not
+replace this full external schedule.
 
 ### Attribution adapter boundary
 
@@ -206,7 +234,9 @@ bash scripts/reproduce/attribution.sh --stage paper --profile paper --config "$A
 The checked-in formal configs deliberately keep adapter: null. They support
 sealed analysis replay and static planning, but formal compute fails closed
 until the operator supplies the adapter and bindings. Attribution GPU
-real-shard verification remains pending by design.
+paper-profile execution remains pending by design. The repository's gated
+single-B200 profiles are fixed reduced verification plans, not substitutes for
+an operator-supplied full-paper adapter deployment.
 
 Before allocating hardware, inspect the exact static plan without executing it:
 
@@ -239,6 +269,9 @@ Family wrappers accept
 `--stage prepare|compute|analyze|paper|all`,
 `--profile smoke|paper`, `--output`, `--resume`, and `--plan-only`. Covertype also
 accepts the release-only `integration` profile described above.
+All family wrappers accept `--devices`; controlled and ImageNet-9 restrict their
+gated real smoke to device 0, while attribution exposes the additional
+verification profiles named above.
 The family-local `paper` stage prepares results for the global renderer; it
 does not compile a manuscript. Resume is receipt-driven: a member is reused only
 when its terminal receipt and declared artifact hashes validate. See

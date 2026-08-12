@@ -44,7 +44,7 @@ checkpoints:
     download_method: official DINOv2 hub
     verification: verified
   - id: dinov2_vitl14_linear_head
-    expected_filename: dinov2_vitl14_linear_head.pth
+    expected_filename: dinov2_vitl14_linear4_head.pth
     sha256: 73c5311cbe56f606deb4601363a6b96c7d5411f8b212d8ac562c5b17a92ee94f
     availability: downloadable
     download_method: official DINOv2 hub
@@ -56,7 +56,7 @@ checkpoints:
     download_method: official DINOv2 hub
     verification: verified
   - id: dinov2_vitg14_linear_head
-    expected_filename: dinov2_vitg14_linear_head.pth
+    expected_filename: dinov2_vitg14_linear4_head.pth
     sha256: ab61850e248839f9e242d7a5a1284feb3eace2dd109fa28f530a75d1bd17942a
     availability: downloadable
     download_method: official DINOv2 hub

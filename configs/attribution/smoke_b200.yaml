@@ -1,0 +1,35 @@
+experiment: attribution
+profile: smoke
+max_workers: 1
+execution:
+  backend: gpu
+  adapter: decaf.experiments.attribution.gpu_runtime:evaluate_member
+  requires_gpu: true
+  verification_profile: single_b200
+  scheduler: single_gpu_dynamic_queue
+  precision: fp32
+  fixed_images: 8
+  dataset_root_env: DECAF_DATA_ROOT
+  checkpoint_root_env: DECAF_CACHE_ROOT
+  dataset_manifests:
+    imagenet1k_idsds: ${DECAF_IDSDS_MANIFEST}
+    funnybirds: ${DECAF_FUNNYBIRDS_MANIFEST}
+  checkpoint_files:
+    idsds_resnet50: ${DECAF_CHECKPOINT_IDSDS_RESNET50}
+    torchvision_resnet50: ${DECAF_CHECKPOINT_TORCHVISION_RESNET50}
+    idsds_vgg16: ${DECAF_CHECKPOINT_IDSDS_VGG16}
+    idsds_vit_base_patch16_224: ${DECAF_CHECKPOINT_IDSDS_VIT_B16}
+    funnybirds_resnet: ${DECAF_CHECKPOINT_FUNNYBIRDS_RESNET50}
+    funnybirds_vgg: ${DECAF_CHECKPOINT_FUNNYBIRDS_VGG16}
+    funnybirds_vit: ${DECAF_CHECKPOINT_FUNNYBIRDS_VIT_B16}
+statistics:
+  bootstrap_replicates: 200
+  bootstrap_seed: 8218
+  endpoint_anchor: decaf_5
+plan:
+  include:
+    - smoke_idsds_deletion_targets
+    - smoke_idsds_primary
+    - smoke_funnybirds_deletion_targets
+    - smoke_funnybirds_heldout_targets
+    - smoke_funnybirds_primary

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Sequence
 
 from decaf.experiments.attribution.analyze import analyze
@@ -25,7 +26,16 @@ from decaf.experiments.common import (
     run_cli,
 )
 
-PROFILES = ("smoke", "main", "paper", "large-model", "boundary")
+PROFILES = (
+    "smoke",
+    "main",
+    "paper",
+    "large-model",
+    "boundary",
+    "large-model-smoke",
+    "boundary-smoke",
+    "smoke-resume",
+)
 
 
 def _validate_prepared_resume(context: RunContext) -> dict[str, object]:
@@ -56,6 +66,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = make_parser("attribution", profiles=PROFILES)
     args = parser.parse_args(argv)
+    if (
+        args.profile == "smoke"
+        and args.config is None
+        and os.environ.get("DECAF_B200_VERIFY") == "1"
+    ):
+        args.config = repository_root() / "configs/attribution/smoke_b200.yaml"
     if args.profile == "large-model" and args.config is None:
         args.config = repository_root() / "configs/attribution/large_model.yaml"
     config = load_profile("attribution", args.profile, args.config)

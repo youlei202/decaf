@@ -120,6 +120,24 @@ atomically; and creates the terminal receipt. Resume revalidates every one of
 those bindings before skipping a member. The adapter must not forge lineage
 columns itself.
 
+## Single-B200 verification receipts
+
+The gated real-shard runners use the same global lifecycle and add one atomic
+receipt per GPU member. A completed receipt binds the canonical job/config hash,
+dataset-manifest hash, checkpoint SHA-256, run-relative output, output SHA-256,
+attempt, device, precision, elapsed time, and peak CUDA memory where applicable.
+The single-device scheduler records queue order, refill events, unique outputs,
+unique receipts, failure isolation, and finalization. A normal SIGTERM makes the
+global receipt terminal (`partial` or `failed`); completed members remain
+reusable and an incomplete member is retried on `--resume`.
+
+Checkpoint fingerprint JSON is separate from experiment output. It contains
+exactly 12 cases and records one or more checkpoint byte identities, fixed
+sample IDs, a little-endian C-contiguous tensor fingerprint, target class,
+rank-two logits and probabilities, float precision, package versions, and the
+single visible B200 identity. The public release includes the portable summary,
+not private asset paths or checkpoint bytes.
+
 ## Portable tables
 
 Canonical raw response tables include the identifiers needed to reconstruct a

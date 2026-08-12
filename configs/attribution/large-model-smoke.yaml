@@ -1,0 +1,25 @@
+experiment: attribution
+profile: large-model-smoke
+max_workers: 1
+execution:
+  backend: gpu
+  adapter: decaf.experiments.attribution.gpu_runtime:evaluate_member
+  requires_gpu: true
+  scheduler: single_gpu_dynamic_queue
+  precision: fp32
+  fixed_images: 8
+  dataset_root_env: DECAF_DATA_ROOT
+  checkpoint_root_env: DECAF_CACHE_ROOT
+  dataset_manifests:
+    imagenet1k_idsds: ${DECAF_IDSDS_MANIFEST}
+  checkpoint_files:
+    dinov2_vitg14_backbone: ${DECAF_CHECKPOINT_DINOV2_VITG14_BACKBONE}
+    dinov2_vitg14_linear_head: ${DECAF_CHECKPOINT_DINOV2_VITG14_HEAD}
+statistics:
+  bootstrap_replicates: 200
+  bootstrap_seed: 8218
+  endpoint_anchor: decaf_5
+plan:
+  include:
+    - smoke_dinov2_g_quality
+    - smoke_dinov2_g_timing

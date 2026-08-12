@@ -29,9 +29,7 @@ def gaussian_blur(images: Any, *, sigma: float) -> Any:
     if selected == 0:
         return images.clone()
     radius = max(1, math.ceil(4.0 * selected))
-    coordinates = torch.arange(
-        -radius, radius + 1, device=images.device, dtype=images.dtype
-    )
+    coordinates = torch.arange(-radius, radius + 1, device=images.device, dtype=images.dtype)
     kernel = torch.exp(-0.5 * (coordinates / selected).square())
     kernel /= kernel.sum()
     channels = int(images.shape[1])
@@ -312,9 +310,7 @@ def _occlusion(
                 int(chunk.shape[0]), int(images.shape[0])
             )
             drops = reference[None] - scores
-            attribution += torch.einsum(
-                "qb,qchw->bchw", drops, chunk.to(dtype=images.dtype)
-            )
+            attribution += torch.einsum("qb,qchw->bchw", drops, chunk.to(dtype=images.dtype))
     return attribution
 
 

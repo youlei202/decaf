@@ -21,6 +21,7 @@ from decaf.verification import (
     _inventory_row,
     _run_command,
     _summarize_plan_report,
+    _validate_fingerprint_case,
     _write_artifact_diff,
 )
 
@@ -213,3 +214,36 @@ def test_plan_summary_fails_closed_on_false_audit() -> None:
 
     with pytest.raises(VerificationFailure, match="assertions failed"):
         _summarize_plan_report("example", report)
+
+
+def test_checkpoint_fingerprint_case_validates_bound_bytes(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"trusted checkpoint")
+    import hashlib
+
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    case = {
+        "family": "example",
+        "case_id": "example_model",
+        "model_id": "model",
+        "checkpoints": [
+            {"path": str(checkpoint), "sha256": digest, "bytes": checkpoint.stat().st_size}
+        ],
+        "sample_ids": ["sample-0"],
+        "preprocessed_tensor": {
+            "sha256": "a" * 64,
+            "dtype": "float32",
+            "shape": [1, 3, 2, 2],
+            "byte_order": "little-endian",
+            "layout": "C-contiguous",
+        },
+        "target_class": [0],
+        "logits": [[1.0, 0.0]],
+        "probabilities": [[0.7310586, 0.2689414]],
+        "precision": "float32",
+        "device": "cuda:0",
+    }
+    _validate_fingerprint_case(case)
+    case["probabilities"] = [[0.7, 0.2]]
+    with pytest.raises(VerificationFailure, match="outputs are invalid"):
+        _validate_fingerprint_case(case)

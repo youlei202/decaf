@@ -91,7 +91,7 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         "dinov2_vit_g_14",
         "DINOv2 ViT-g/14",
         "transformer",
-        ("partimagenet",),
+        ("imagenet1k_idsds", "partimagenet"),
         ("dinov2_vitg14_backbone", "dinov2_vitg14_linear_head"),
     ),
 )

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from decaf.core.manifests import atomic_write_json, read_json, to_jsonable
+
+UTC_TIMEZONE = getattr(__import__("datetime"), "UTC", timezone.utc)  # noqa: UP017
 
 MEMBER_STATUSES = frozenset({"running", "failed", "completed", "skipped"})
 GLOBAL_STATUSES = frozenset(
@@ -24,7 +26,7 @@ GLOBAL_STATUSES = frozenset(
 def utc_now() -> str:
     """Return a stable UTC timestamp."""
 
-    return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    return datetime.now(UTC_TIMEZONE).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _identifier(value: str, *, name: str) -> str:

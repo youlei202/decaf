@@ -351,9 +351,7 @@ def analyze(context: RunContext) -> dict[str, Any]:
         import json
 
         gpu_verified = bool(
-            json.loads(compute_receipt.read_text(encoding="utf-8")).get(
-                "gpu_inference_verified"
-            )
+            json.loads(compute_receipt.read_text(encoding="utf-8")).get("gpu_inference_verified")
         )
         if not gpu_verified:
             raise ValueError("real ImageNet-9 compute receipt does not verify GPU inference")

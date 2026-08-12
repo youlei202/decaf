@@ -9,11 +9,11 @@ archives that a dataset license may require you to obtain separately.
 | Unit tests and repository audit | 2 CPU cores, 8 GB RAM | 8 CPU cores, 16 GB RAM | None |
 | Frozen analysis replay and TeX generation | 4 CPU cores, 16 GB RAM | 16-32 CPU cores, 32-64 GB RAM | None |
 | Controlled smoke | 8 CPU cores, 32 GB RAM, one CUDA GPU | 16 CPU cores, 64 GB RAM | One modern GPU |
-| Controlled full plan | 16 CPU cores, 64 GB RAM | 32 CPU cores and at least four high-memory CUDA GPUs | Real GPU shards remain to be independently verified |
+| Controlled full plan | 16 CPU cores, 64 GB RAM | 32 CPU cores and at least four high-memory CUDA GPUs | Representative single-B200 shard verified; full plan not rerun |
 | ImageNet-9 smoke | 8 CPU cores, 32 GB RAM, one CUDA GPU | 16 CPU cores, 64 GB RAM | One modern GPU |
-| ImageNet-9 full plan | 16 CPU cores, 128 GB RAM | 32 or more CPU cores, 256 GB RAM, eight high-memory CUDA GPUs | Reference topology used multiple GPUs; real shards remain to be independently verified |
+| ImageNet-9 full plan | 16 CPU cores, 128 GB RAM | 32 or more CPU cores, 256 GB RAM, eight high-memory CUDA GPUs | Representative single-B200 shard verified; full plan not rerun |
 | Attribution smoke | 8 CPU cores, 32 GB RAM, one CUDA GPU | 16 CPU cores, 64 GB RAM | One modern GPU |
-| Attribution full plan | 16 CPU cores, 128 GB RAM | 32 or more CPU cores, 256 GB RAM, eight high-memory CUDA GPUs | DINOv2-g should run alone on a 48-80 GB GPU; real shards remain to be independently verified |
+| Attribution full plan | 16 CPU cores, 128 GB RAM | 32 or more CPU cores, 256 GB RAM, eight high-memory CUDA GPUs | Main, DINOv2-g, and PartImageNet single-B200 paths verified; full plan not rerun |
 | Covertype smoke | 4 CPU cores, 16 GB RAM | 16 CPU cores, 32 GB RAM | None |
 | Covertype full plan | 16 CPU cores, 64 GB RAM | 32 CPU cores, 64-128 GB RAM | CPU-only; 135 models |
 
@@ -39,8 +39,9 @@ substantially.
 
 The all-CPU verification lane validates tests, frozen analysis replay, paper
 regeneration, a real small Covertype integration, static paper plans, and public
-repository hygiene. It does **not** validate CUDA kernels, multi-GPU scheduling,
-real ImageNet shards, or full attribution inference. Those accelerator-backed
-checks are explicitly pending until they run on provisioned GPUs with the
-licensed datasets and checkpoints. CPU success must not be reported as full GPU
-verification.
+repository hygiene. The separate v2 single-B200 workflow validates
+representative real CUDA shards, checkpoint fingerprints, receipt-driven resume,
+and a heterogeneous one-device queue. It does **not** validate real multi-GPU
+scheduling or rerun the paper-scale plans. CPU success alone must not be reported
+as GPU verification, and single-B200 success must not be reported as a full
+paper-scale recomputation.

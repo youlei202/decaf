@@ -15,8 +15,16 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from decaf.audit import audit_repository
-from decaf.experiments.common import atomic_json, atomic_text, repository_root, utc_now
+from decaf.experiments.common import (
+    atomic_json,
+    atomic_text,
+    parse_devices,
+    repository_root,
+    utc_now,
+)
 from decaf.paper.analysis_replay import replay_paper_data
 from decaf.paper.manifest import load_visual_manifest
 from decaf.paper.render import PaperRenderError, render_all, validate_rendered_asset
@@ -24,6 +32,7 @@ from decaf.paper.render import PaperRenderError, render_all, validate_rendered_a
 MODES = (
     "all-cpu",
     "analysis-replay",
+    "checkpoint-fingerprint",
     "unit",
     "integration-cpu",
     "full-plan",
@@ -31,6 +40,7 @@ MODES = (
     "repository-audit",
 )
 FAMILIES = ("controlled", "imagenet9", "attribution", "covertype")
+FINGERPRINT_CASE_COUNTS = {"controlled": 2, "imagenet9": 3, "attribution": 7}
 
 
 class VerificationFailure(RuntimeError):
@@ -43,6 +53,188 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _canonical_json_sha256(payload: Any) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _gpu_environment(torch: Any, device: Any) -> dict[str, Any]:
+    """Record the exact local software and CUDA device used for fingerprints."""
+
+    import importlib.metadata
+    import platform
+
+    versions: dict[str, str | None] = {}
+    for distribution in ("torch", "torchvision", "timm", "captum", "numpy"):
+        try:
+            versions[distribution] = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            versions[distribution] = None
+    properties = torch.cuda.get_device_properties(device)
+    return {
+        "python": platform.python_version(),
+        "libraries": versions,
+        "cuda_runtime": torch.version.cuda,
+        "cudnn": torch.backends.cudnn.version(),
+        "device_index": int(device.index or 0),
+        "device_name": properties.name,
+        "device_uuid": str(getattr(properties, "uuid", "unavailable")),
+        "device_total_memory_bytes": int(properties.total_memory),
+    }
+
+
+def _validate_fingerprint_case(case: Mapping[str, Any]) -> None:
+    required = {
+        "family",
+        "case_id",
+        "model_id",
+        "checkpoints",
+        "sample_ids",
+        "preprocessed_tensor",
+        "target_class",
+        "logits",
+        "probabilities",
+        "precision",
+        "device",
+    }
+    missing = sorted(required - set(case))
+    if missing:
+        raise VerificationFailure(f"fingerprint case is missing fields: {missing}")
+    checkpoints = case["checkpoints"]
+    if not isinstance(checkpoints, list) or not checkpoints:
+        raise VerificationFailure(f"fingerprint case has no checkpoints: {case['case_id']}")
+    for checkpoint in checkpoints:
+        if not isinstance(checkpoint, Mapping):
+            raise VerificationFailure("fingerprint checkpoint is not an object")
+        path = Path(str(checkpoint.get("path", "")))
+        expected = str(checkpoint.get("sha256", ""))
+        if not path.is_file() or len(expected) != 64 or _sha256(path) != expected:
+            raise VerificationFailure(f"fingerprint checkpoint bytes drifted: {path}")
+        if int(checkpoint.get("bytes", -1)) != path.stat().st_size:
+            raise VerificationFailure(f"fingerprint checkpoint size drifted: {path}")
+    tensor = case["preprocessed_tensor"]
+    if not isinstance(tensor, Mapping) or not {
+        "sha256",
+        "dtype",
+        "shape",
+        "byte_order",
+        "layout",
+    }.issubset(tensor):
+        raise VerificationFailure(f"fingerprint tensor contract is incomplete: {case['case_id']}")
+    logits = np.asarray(case["logits"], dtype=np.float64)
+    probabilities = np.asarray(case["probabilities"], dtype=np.float64)
+    if (
+        logits.ndim != 2
+        or probabilities.shape != logits.shape
+        or logits.shape[0] < 1
+        or not np.isfinite(logits).all()
+        or not np.isfinite(probabilities).all()
+        or np.any(probabilities < 0.0)
+        or not np.allclose(probabilities.sum(axis=1), 1.0, atol=1.0e-5, rtol=0.0)
+    ):
+        raise VerificationFailure(f"fingerprint outputs are invalid: {case['case_id']}")
+
+
+def run_checkpoint_fingerprint(
+    repo: Path,
+    verification: Path,
+    devices: Sequence[int],
+) -> dict[str, Any]:
+    """Load the exact offline checkpoints and record real CUDA forward fingerprints."""
+
+    if tuple(devices) != (0,):
+        raise VerificationFailure("single-B200 fingerprint verification requires --devices 0")
+    try:
+        import torch
+    except ImportError as error:
+        message = "checkpoint fingerprints require the persistent GPU PyTorch"
+        raise VerificationFailure(message) from error
+    if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
+        raise VerificationFailure(
+            "checkpoint fingerprints require exactly one CUDA device visible to PyTorch"
+        )
+    device = torch.device("cuda:0")
+    environment = _gpu_environment(torch, device)
+    if "B200" not in str(environment["device_name"]):
+        raise VerificationFailure(f"expected an NVIDIA B200, received {environment['device_name']}")
+
+    collectors = {
+        "controlled": (
+            "decaf.experiments.controlled.gpu_runtime",
+            "collect_checkpoint_fingerprints",
+        ),
+        "imagenet9": (
+            "decaf.experiments.imagenet9.gpu_runtime",
+            "collect_checkpoint_fingerprints",
+        ),
+        "attribution": (
+            "decaf.experiments.attribution.gpu_runtime",
+            "collect_checkpoint_fingerprints",
+        ),
+    }
+    import importlib
+
+    cases: list[dict[str, Any]] = []
+    coverage: dict[str, int] = {}
+    for family, (module_name, function_name) in collectors.items():
+        module = importlib.import_module(module_name)
+        collector = getattr(module, function_name, None)
+        if not callable(collector):
+            raise VerificationFailure(f"{module_name} does not export {function_name}")
+        family_cases = list(collector(device=device))
+        if len(family_cases) != FINGERPRINT_CASE_COUNTS[family]:
+            raise VerificationFailure(
+                f"{family} produced {len(family_cases)} fingerprint cases, "
+                f"expected {FINGERPRINT_CASE_COUNTS[family]}"
+            )
+        for case in family_cases:
+            _validate_fingerprint_case(case)
+        coverage[family] = len(family_cases)
+        cases.extend(dict(case) for case in family_cases)
+        torch.cuda.empty_cache()
+    case_ids = [str(case["case_id"]) for case in cases]
+    if len(case_ids) != len(set(case_ids)) or len(cases) != sum(FINGERPRINT_CASE_COUNTS.values()):
+        raise VerificationFailure("fingerprint case coverage is duplicated or incomplete")
+
+    payload = {
+        "schema_version": 1,
+        "status": "passed",
+        "repository": _git_identity(repo),
+        "environment": environment,
+        "tensor_hash_contract": {
+            "algorithm": "sha256",
+            "source": "C-contiguous tensor bytes after CPU conversion",
+            "byte_order": "little-endian",
+            "shape_and_dtype_recorded_separately": True,
+        },
+        "coverage": coverage,
+        "case_count": len(cases),
+        "cases": cases,
+    }
+    fingerprints_path = verification / "checkpoint_fingerprints.json"
+    atomic_json(fingerprints_path, payload)
+    report = {
+        "schema_version": 1,
+        "status": "passed",
+        "checkpoint_fingerprints_path": "checkpoint_fingerprints.json",
+        "checkpoint_fingerprints_sha256": _sha256(fingerprints_path),
+        "case_set_sha256": _canonical_json_sha256(case_ids),
+        "coverage": coverage,
+        "case_count": len(cases),
+        "device": environment,
+        "checks": {
+            "exact_case_coverage": True,
+            "checkpoint_bytes_verified": True,
+            "preprocessed_tensor_hashes_recorded": True,
+            "finite_logits": True,
+            "normalized_probabilities": True,
+            "single_b200": True,
+        },
+    }
+    atomic_json(verification / "checkpoint_fingerprint_report.json", report)
+    return report
 
 
 def _portable_command(command: Sequence[str]) -> list[str]:
@@ -769,6 +961,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output", type=Path, help="Verification report directory")
     parser.add_argument("--generated-root", type=Path, help="Generated TeX root")
+    parser.add_argument(
+        "--devices",
+        default=(0,),
+        type=parse_devices,
+        help="Comma-separated physical CUDA IDs; checkpoint fingerprinting requires 0",
+    )
     return parser
 
 
@@ -778,6 +976,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     verification = (args.output or repo / "verification").resolve()
     generated = (args.generated_root or repo / "paper" / "generated").resolve()
     verification.mkdir(parents=True, exist_ok=True)
+    report_name = (
+        "checkpoint_fingerprint_verification.json"
+        if args.mode == "checkpoint-fingerprint"
+        else "cpu_verification.json"
+    )
     steps: dict[str, Any] = {}
     started_at = utc_now()
     identity = _git_identity(repo)
@@ -801,6 +1004,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             steps["full_plan"] = run_full_plan(repo)
         if args.mode in {"repository-audit", "all-cpu"}:
             steps["repository_audit"] = run_repository_audit(repo, verification)
+        if args.mode == "checkpoint-fingerprint":
+            steps["checkpoint_fingerprint"] = run_checkpoint_fingerprint(
+                repo,
+                verification,
+                args.devices,
+            )
     except Exception as error:
         report = {
             "schema_version": 1,
@@ -808,12 +1017,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "status": "failed",
             "started_at": started_at,
             "finished_at": utc_now(),
-            "gpu_real_shard_verification": "pending",
+            "gpu_real_shard_verification": (
+                "failed" if args.mode == "checkpoint-fingerprint" else "pending"
+            ),
             **identity,
             "steps": steps,
             "error": f"{type(error).__name__}: {error}",
         }
-        atomic_json(verification / "cpu_verification.json", report)
+        atomic_json(verification / report_name, report)
         raise
     report = {
         "schema_version": 1,
@@ -821,13 +1032,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "status": "passed",
         "started_at": started_at,
         "finished_at": utc_now(),
-        "gpu_real_shard_verification": "pending",
+        "gpu_real_shard_verification": (
+            "checkpoint_fingerprints_passed" if args.mode == "checkpoint-fingerprint" else "pending"
+        ),
         **identity,
         "steps": steps,
     }
-    atomic_json(verification / "cpu_verification.json", report)
+    atomic_json(verification / report_name, report)
     print(f"verification_status={report['status']}")
-    print("gpu_real_shard_verification=pending")
+    print(f"gpu_real_shard_verification={report['gpu_real_shard_verification']}")
     return 0
 
 
@@ -840,6 +1053,7 @@ __all__ = [
     "build_parser",
     "main",
     "run_analysis_replay",
+    "run_checkpoint_fingerprint",
     "run_full_plan",
     "run_integration_cpu",
     "run_quality",

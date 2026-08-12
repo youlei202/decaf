@@ -818,7 +818,11 @@ def _validate_attribution_member_bindings(
     for member_id, job in jobs.items():
         receipt = persisted[member_id]
         details = _require_mapping(receipt.get("details"), f"{spec.key} member details")
-        expected_rows = 1 if job.get("kind") == "timing" else job["image_stop"] - job["image_start"]
+        expected_rows = (
+            1
+            if job.get("kind") in {"timing", "large_model_timing"}
+            else job["image_stop"] - job["image_start"]
+        )
         if (
             details.get("output_path") != job["output_path"]
             or details.get("scope") != job.get("scope")

@@ -1270,6 +1270,24 @@ def test_nonrenormalized_imagenet9_probability_mass_is_validated() -> None:
         module._validate_subprobabilities([[0.5, 0.6]], "mapped ImageNet-9 probabilities")
 
 
+def test_large_model_timing_members_expect_one_aggregate_row(tmp_path: Path) -> None:
+    module = _module()
+    root = tmp_path / "b200-verification"
+    _fixture(root)
+    plan_path = root / "runs/dinov2_g/manifests/plan.json"
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    timing_job = plan["members"][0]
+    timing_job["kind"] = "large_model_timing"
+    timing_job["image_stop"] = 8
+    _write_json(plan_path, plan)
+
+    global_receipt = json.loads(
+        (root / "runs/dinov2_g/receipts/compute_members.json").read_text(encoding="utf-8")
+    )
+    spec = next(spec for spec in module.RUN_SPECS if spec.key == "dinov2_g")
+    module._validate_attribution_member_bindings(module.Evidence(root), spec, plan, global_receipt)
+
+
 def test_finalizer_rejects_tampered_analysis_before_writing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -338,6 +338,25 @@ def analyze(context: RunContext) -> dict[str, Any]:
         if source_mode == "sealed_reference_replay"
         else {}
     )
+    from decaf.experiments.imagenet9.gpu_runtime import (
+        b200_enabled,
+        write_downstream_receipt,
+    )
+
+    gpu_verified = False
+    if b200_enabled(context.config):
+        compute_receipt = context.path / "receipts" / "imagenet9_b200_compute.json"
+        if not compute_receipt.is_file():
+            raise FileNotFoundError("real ImageNet-9 analysis requires the B200 compute receipt")
+        import json
+
+        gpu_verified = bool(
+            json.loads(compute_receipt.read_text(encoding="utf-8")).get(
+                "gpu_inference_verified"
+            )
+        )
+        if not gpu_verified:
+            raise ValueError("real ImageNet-9 compute receipt does not verify GPU inference")
     report = {
         "schema_version": 1,
         "source": "metrics/decaf_scores.csv",
@@ -352,9 +371,20 @@ def analyze(context: RunContext) -> dict[str, Any]:
         "source_mode": source_mode,
         "reference_input_count": len(reference_receipts),
         "reference_headlines": headlines,
-        "gpu_inference_verified": False,
+        "gpu_inference_verified": gpu_verified,
     }
     atomic_json(context.path / "metrics" / "summary.json", report)
+    if gpu_verified:
+        artifacts = [
+            "metrics/summary.json",
+            "metrics/matched_magnitude_accuracy.json",
+            "metrics/protocol_ratios.csv",
+            "metrics/protocol_rank_transfer.csv",
+            "metrics/mechanism_summary.csv",
+        ]
+        if (context.path / "metrics" / "baseline_summary.csv").is_file():
+            artifacts.append("metrics/baseline_summary.csv")
+        write_downstream_receipt(context, "analyze", artifacts)
     return report
 
 

@@ -36,3 +36,62 @@ checkpoints:
 paper_assets:
   figures: [6, 7, 12]
   tables: [1]
+b200_smoke:
+  activation_environment: DECAF_B200_VERIFY
+  source_pairs: 16
+  pair_types: [same_rand, same_next]
+  reveal_paths: [blend, patch_A, patch_B]
+  alpha: [0.0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0]
+  epsilon: 0.02
+  input_size: 224
+  blur_sigma: 8.0
+  patch_grid: [8, 8]
+  patch_seed: 7101
+  selection_seed: 91701
+  inference_batch_size: 64
+  attribution_pair_batch_size: 4
+  attribution_internal_batch_size: 64
+  methods: [input_x_gradient, integrated_gradients, smoothgrad, occlusion, rise]
+  integrated_gradients_steps: 16
+  smoothgrad_samples: 16
+  smoothgrad_noise_std: 0.15
+  occlusion_grid: [7, 7]
+  rise_masks: 256
+  rise_grid: [7, 7]
+  rise_keep_probability: 0.5
+  asset_environments:
+    dataset_root: DECAF_DATA_ROOT
+    weight_cache_root: DECAF_IMAGENET9_WEIGHT_CACHE_ROOT
+    checkpoint_root: DECAF_IMAGENET9_CHECKPOINT_ROOT
+    pretrained_resnet18: DECAF_IMAGENET9_PRETRAINED_RESNET18
+    finetuned_cnn: DECAF_IMAGENET9_FINETUNED_CNN
+    finetuned_transformer: DECAF_IMAGENET9_FINETUNED_TRANSFORMER
+    official_mapping: DECAF_IMAGENET9_MAPPING
+  models:
+    - model_id: tv_resnet18_imagenet1k_v1
+      kind: off_the_shelf
+      architecture: resnet18
+      architecture_family: cnn
+      output_classes: 1000
+      checkpoint_environment: pretrained_resnet18
+      checkpoint_relative: torch/hub/checkpoints/resnet18-f37072fd.pth
+      checkpoint_sha256: f37072fd47e89c5e827621c5baffa7500819f7896bbacec160b1a16c560e07ec
+      checkpoint_bytes: 46830571
+    - model_id: ft_resnet50_original_s7101
+      kind: fine_tuned
+      architecture: resnet50
+      architecture_family: cnn
+      output_classes: 9
+      checkpoint_environment: finetuned_cnn
+      checkpoint_relative: ft_resnet50_original_s7101/best.pt
+      checkpoint_sha256: fd88804bae846b971fbcac05236c82b2fc385a3ce1357d1aabd5b87dd5134130
+      checkpoint_bytes: 94416319
+    - model_id: ft_vit_b_16_original_s7101
+      kind: fine_tuned
+      architecture: vit_b_16
+      architecture_family: transformer
+      output_classes: 9
+      checkpoint_environment: finetuned_transformer
+      checkpoint_relative: ft_vit_b_16_original_s7101/best.pt
+      checkpoint_sha256: 55d9c142dab8b4936971421c97939d95eab6e718c18d65b977545eab37fa95ef
+      checkpoint_bytes: 343274319

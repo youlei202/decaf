@@ -302,6 +302,14 @@ def build_formal_plan(config: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_execution_plan(config: Mapping[str, Any]) -> dict[str, Any]:
+    """Select the gated real-B200 plan without changing the default CPU smoke."""
+
+    from decaf.experiments.imagenet9.gpu_runtime import b200_enabled, build_b200_plan
+
+    return build_b200_plan(config) if b200_enabled(config) else build_formal_plan(config)
+
+
 def validate_response_frame(frame: pd.DataFrame) -> pd.DataFrame:
     """Validate long-form score trajectories before scientific evaluation."""
 
@@ -402,6 +410,11 @@ def _smoke_responses(config: Mapping[str, Any]) -> pd.DataFrame:
 
 def prepare(context: RunContext) -> dict[str, Any]:
     """Materialize public manifests without copying any restricted imagery."""
+
+    from decaf.experiments.imagenet9.gpu_runtime import b200_enabled, prepare_b200
+
+    if context.profile == "smoke" and b200_enabled(context.config):
+        return prepare_b200(context)
 
     records = model_registry(context.config)
     if context.profile == "smoke":
@@ -705,6 +718,11 @@ def _load_materialized_members(
 def compute(context: RunContext) -> dict[str, Any]:
     """Evaluate a smoke oracle or sealed GPU-produced response trajectories."""
 
+    from decaf.experiments.imagenet9.gpu_runtime import b200_enabled, compute_b200
+
+    if context.profile == "smoke" and b200_enabled(context.config):
+        return compute_b200(context)
+
     plan = build_formal_plan(context.config)
     if context.profile == "smoke":
         frame = _smoke_responses(context.config)
@@ -733,11 +751,40 @@ def compute(context: RunContext) -> dict[str, Any]:
     }
 
 
+def validate_prepare_resume(context: RunContext) -> dict[str, Any]:
+    """Validate gated B200 prepare bytes; default runs retain legacy behavior."""
+
+    from decaf.experiments.imagenet9.gpu_runtime import (
+        b200_enabled,
+        validate_b200_prepare_resume,
+    )
+
+    if b200_enabled(context.config):
+        return validate_b200_prepare_resume(context)
+    return {"b200_prepare_validated": False}
+
+
+def validate_compute_resume(context: RunContext) -> dict[str, Any]:
+    """Validate gated B200 member/aggregate hashes before compute is skipped."""
+
+    from decaf.experiments.imagenet9.gpu_runtime import (
+        b200_enabled,
+        validate_b200_compute_resume,
+    )
+
+    if b200_enabled(context.config):
+        return validate_b200_compute_resume(context)
+    return {"b200_compute_validated": False}
+
+
 __all__ = [
     "RESPONSE_COLUMNS",
+    "build_execution_plan",
     "build_formal_plan",
     "compute",
     "evaluate_response_frame",
     "prepare",
+    "validate_compute_resume",
+    "validate_prepare_resume",
     "validate_response_frame",
 ]

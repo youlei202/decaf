@@ -154,7 +154,17 @@ def paper(context: RunContext) -> dict[str, Any]:
     ratios = pd.read_csv(ratios_path)
     accuracy = json.loads(accuracy_path.read_text(encoding="utf-8"))
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    methods = pd.DataFrame(baseline_plan(list(map(str, context.config["baselines"]["methods"]))))
+    from decaf.experiments.imagenet9.gpu_runtime import (
+        b200_enabled,
+        b200_method_plan,
+        write_downstream_receipt,
+    )
+
+    methods = pd.DataFrame(
+        b200_method_plan(context.config)
+        if b200_enabled(context.config)
+        else baseline_plan(list(map(str, context.config["baselines"]["methods"])))
+    )
 
     reference_root = context.path / "reference_data" / "I9"
     benchmark_path = reference_root / "results" / "tables" / "T04_mechanism_benchmark.csv"
@@ -227,6 +237,11 @@ def paper(context: RunContext) -> dict[str, Any]:
         ),
     }
     atomic_json(context.path / "paper_data" / "manifest.json", receipt)
+    if b200_enabled(context.config):
+        artifacts = ["paper_data/manifest.json", *outputs.values(), rank_destination]
+        if baseline_summary_path.is_file():
+            artifacts.append("paper_data/table_1_baseline_summary.csv")
+        write_downstream_receipt(context, "paper", artifacts)
     return {
         "paper_assets": len(outputs),
         "source_assets": sum(map(len, source_inputs.values())),

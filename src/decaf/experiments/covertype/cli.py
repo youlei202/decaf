@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Sequence
 
-from decaf.experiments.common import RunContext, make_parser, run_cli
+from decaf.experiments.common import RunContext, make_parser, repository_root, run_cli
 from decaf.experiments.covertype.analyze import analyze
 from decaf.experiments.covertype.evaluate import (
     build_formal_plan,
@@ -43,6 +44,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = make_parser("covertype", profiles=("smoke", "integration", "paper"))
     arguments = parser.parse_args(argv)
+    if (
+        os.environ.get("DECAF_B200_VERIFY") == "1"
+        and arguments.profile == "smoke"
+        and arguments.config is None
+    ):
+        # The release-verification contract names this command ``smoke`` while
+        # requiring the pinned real Covertype shard.  Keep the public smoke
+        # fixture unchanged outside the explicitly gated B200 workflow.
+        arguments.config = repository_root() / "configs" / "covertype" / "integration.yaml"
     return run_cli(
         experiment="covertype",
         args=arguments,

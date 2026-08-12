@@ -23,6 +23,27 @@ from decaf.experiments.covertype.mechanisms import (
 )
 
 
+def test_b200_smoke_uses_pinned_real_integration_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from decaf.experiments.covertype import cli
+
+    captured: dict[str, object] = {}
+
+    def fake_run_cli(**kwargs: object) -> int:
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setenv("DECAF_B200_VERIFY", "1")
+    monkeypatch.setattr(cli, "run_cli", fake_run_cli)
+    assert cli.main(["--profile", "smoke", "--plan-only", "--output", str(tmp_path)]) == 0
+    arguments = captured["args"]
+    assert arguments.config == (
+        cli.repository_root() / "configs" / "covertype" / "integration.yaml"
+    )
+
+
 def test_formal_plan_proves_exact_135_model_cartesian_product() -> None:
     plan = build_formal_plan()
     specs = formal_specs()

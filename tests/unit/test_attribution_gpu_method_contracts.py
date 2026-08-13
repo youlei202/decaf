@@ -219,6 +219,42 @@ def test_runtime_domain_metadata_and_canonical_correctness_are_explicit() -> Non
     assert MODEL_INPUT_DOMAIN != RAW_RGB_INPUT_DOMAIN
 
 
+def test_decaf_primary_scores_are_unsigned_e_for_negative_endpoints() -> None:
+    torch = pytest.importorskip("torch")
+    sample = _sample(torch)
+
+    class SignedLinearModel(torch.nn.Module):
+        def forward(self, value: object) -> object:
+            score = value.sum(dim=(1, 2, 3))
+            zeros = torch.zeros(
+                (int(value.shape[0]), 999),
+                device=value.device,
+                dtype=value.dtype,
+            )
+            return torch.cat((score[:, None], zeros), dim=1)
+
+    scores, metadata = _method(
+        "decaf_3",
+        SignedLinearModel(),
+        sample,
+        device="cpu",
+        precision="fp32",
+        seed=3,
+    )
+    endpoint = np.asarray(
+        [(sample.image * mask).sum().item() for mask in sample.masks],
+        dtype=np.float64,
+    )
+    unsigned_e = np.asarray(metadata["E"], dtype=np.float64)
+    signed_e = np.sign(endpoint) * unsigned_e
+
+    assert bool((endpoint < 0.0).any())
+    assert bool((unsigned_e > 0.0).any())
+    np.testing.assert_allclose(scores, unsigned_e, rtol=0.0, atol=0.0)
+    assert bool((scores >= 0.0).all())
+    assert not np.array_equal(scores, signed_e)
+
+
 def test_idsds_random_banks_and_gauss_legendre_rule_match_frozen_goldens() -> None:
     torch = pytest.importorskip("torch")
     image = torch.empty((3, 9, 11), dtype=torch.float32)

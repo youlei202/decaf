@@ -18,6 +18,7 @@ from decaf.experiments.attribution.gpu_runtime import (
     FINGERPRINT_CASES,
     CheckpointSpec,
     _normalize_idsds,
+    _strict_fp32_backends,
     resolve_checkpoint,
     validate_checkpoint_fingerprint_rows,
 )
@@ -134,6 +135,52 @@ def test_idsds_vit_uses_the_official_half_range_normalization() -> None:
 
     assert torch.equal(vit.flatten(), torch.tensor([-1.0, 0.0, 1.0]))
     assert not torch.equal(vit, resnet)
+
+
+def test_strict_fp32_backend_contract_is_scoped_and_restored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_torch = SimpleNamespace(
+        backends=SimpleNamespace(
+            cuda=SimpleNamespace(matmul=SimpleNamespace(allow_tf32=True)),
+            cudnn=SimpleNamespace(allow_tf32=True),
+        )
+    )
+    monkeypatch.setattr(
+        "decaf.experiments.attribution.gpu_runtime._torch", lambda: fake_torch
+    )
+
+    with _strict_fp32_backends() as contract:
+        assert contract == {
+            "cuda_matmul_allow_tf32": False,
+            "cudnn_allow_tf32": False,
+        }
+        assert fake_torch.backends.cuda.matmul.allow_tf32 is False
+        assert fake_torch.backends.cudnn.allow_tf32 is False
+
+    assert fake_torch.backends.cuda.matmul.allow_tf32 is True
+    assert fake_torch.backends.cudnn.allow_tf32 is True
+
+
+def test_strict_fp32_backend_contract_restores_after_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_torch = SimpleNamespace(
+        backends=SimpleNamespace(
+            cuda=SimpleNamespace(matmul=SimpleNamespace(allow_tf32=False)),
+            cudnn=SimpleNamespace(allow_tf32=True),
+        )
+    )
+    monkeypatch.setattr(
+        "decaf.experiments.attribution.gpu_runtime._torch", lambda: fake_torch
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic"):
+        with _strict_fp32_backends():
+            raise RuntimeError("synthetic")
+
+    assert fake_torch.backends.cuda.matmul.allow_tf32 is False
+    assert fake_torch.backends.cudnn.allow_tf32 is True
 
 
 def _queue_job(member_id: str, method_id: str, dependencies: list[str]) -> dict[str, object]:

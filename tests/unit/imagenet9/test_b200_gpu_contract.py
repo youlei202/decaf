@@ -124,6 +124,41 @@ def test_reveal_paths_share_the_neutral_and_are_nested() -> None:
     assert torch.equal(patch_minus[-1], minus)
 
 
+def test_reveal_path_consumes_and_validates_explicit_patch_order() -> None:
+    torch = pytest.importorskip("torch")
+    plus = torch.zeros((1, 3, 4, 4), dtype=torch.float32)
+    minus = torch.ones_like(plus)
+    kwargs = {
+        "pair_ids": ["historical-pair"],
+        "path": "patch_A",
+        "alpha": (0.0, 0.25, 1.0),
+        "blur_sigma": 0.0,
+        "patch_grid": (2, 2),
+        "patch_seed": 7101,
+    }
+    stages, _ = reveal_sequence(
+        plus,
+        minus,
+        patch_orders={"historical-pair": [3, 2, 1, 0]},
+        **kwargs,
+    )
+    neutral = stages[0, 0]
+    revealed = (stages[1, 0] != neutral).any(dim=0)
+    assert not bool(revealed[:2, :].any())
+    assert not bool(revealed[2:, :2].any())
+    assert bool(revealed[2:, 2:].all())
+
+    with pytest.raises(ValueError, match="complete 4-index permutation"):
+        reveal_sequence(
+            plus,
+            minus,
+            patch_orders={"historical-pair": [0, 0, 1, 2]},
+            **kwargs,
+        )
+    with pytest.raises(KeyError, match="historical-pair"):
+        reveal_sequence(plus, minus, patch_orders={}, **kwargs)
+
+
 def test_shared_midpoint_is_forwarded_once_not_in_two_batch_lanes() -> None:
     torch = pytest.importorskip("torch")
 

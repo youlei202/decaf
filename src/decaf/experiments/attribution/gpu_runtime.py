@@ -25,6 +25,7 @@ import sys
 import time
 import types
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -275,6 +276,25 @@ def _torch() -> Any:
             "real attribution verification requires the configured GPU Python with torch"
         ) from error
     return torch
+
+
+@contextmanager
+def _strict_fp32_backends() -> Any:
+    """Disable TF32 for one attribution member and restore process state."""
+
+    torch = _torch()
+    previous_matmul = bool(torch.backends.cuda.matmul.allow_tf32)
+    previous_cudnn = bool(torch.backends.cudnn.allow_tf32)
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    try:
+        yield {
+            "cuda_matmul_allow_tf32": False,
+            "cudnn_allow_tf32": False,
+        }
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = previous_matmul
+        torch.backends.cudnn.allow_tf32 = previous_cudnn
 
 
 def _required_path(
@@ -1567,7 +1587,7 @@ def _decaf(
     )
     if not scores["numeric_audit"]["passed"]:
         raise AssertionError("real-GPU DECAF trajectory failed its numeric audit")
-    part_scores = torch.as_tensor(scores["signed_E"], device=image.device, dtype=torch.float64)
+    part_scores = torch.as_tensor(scores["E"], device=image.device, dtype=torch.float64)
     metadata = {
         "M": np.asarray(scores["M"], dtype=np.float64),
         "E": np.asarray(scores["E"], dtype=np.float64),
@@ -2606,59 +2626,68 @@ def evaluate_member(job: Mapping[str, Any], context: RunContext) -> pd.DataFrame
         raise ValueError("DECAF_RESUME_TEST_MEMBER_DELAY_SECONDS must lie in [0,60]")
     if delay:
         time.sleep(delay)
-    device, device_name = _device_contract()
-    execution = context.config.get("execution", {})
-    if not isinstance(execution, Mapping):
-        raise TypeError("execution configuration must be a mapping")
-    precision = str(execution.get("precision", "fp32"))
-    dataset = str(job["dataset"])
-    model_id = str(job["model_id"])
-    bare_model = _active_model(model_id, dataset, device, precision)
-    model = _runtime_model(bare_model, model_id, dataset)
-    samples = _selected_samples(
-        context,
-        dataset,
-        model_id,
-        model,
-        device=device,
-        precision=precision,
-    )
-    start, stop = int(job["image_start"]), int(job["image_stop"])
-    selected = samples[start:stop]
-    if len(selected) != int(job["image_count"]):
-        raise RuntimeError("fixed sample selection does not cover the member image range")
-    kind = str(job["kind"])
-    if kind in {
-        "shared_deletion_targets",
-        "shared_part_deletion_targets",
-        "shared_heldout_targets",
-    }:
-        frame = _target_frame(job, selected, model, device=device, precision=precision)
-    elif kind in {"timing", "large_model_timing"}:
-        frame = _timing_frame(job, selected, model, device=device, precision=precision)
-    else:
-        frame = _quality_frame(job, selected, model, device=device, precision=precision)
-    torch = _torch()
-    raw_checkpoint_assets = tuple(getattr(bare_model, "decaf_checkpoint_assets", ()))
-    if not raw_checkpoint_assets:
-        raise RuntimeError("real attribution model lacks checkpoint lineage")
-    checkpoint_assets = tuple(
-        {
-            "checkpoint_id": str(asset["checkpoint_id"]),
-            "sha256": str(asset["sha256"]),
-            "bytes": int(asset["bytes"]),
-        }
-        for asset in raw_checkpoint_assets
-    )
-    checkpoint_json = json.dumps(checkpoint_assets, sort_keys=True, separators=(",", ":"))
-    frame["runtime_device"] = device
-    frame["runtime_device_name"] = device_name
-    frame["runtime_precision"] = precision
-    frame["runtime_torch_version"] = str(torch.__version__)
-    frame["runtime_cuda_version"] = str(torch.version.cuda)
-    frame["checkpoint_assets_json"] = checkpoint_json
-    frame["checkpoint_assets_sha256"] = hashlib.sha256(checkpoint_json.encode("utf-8")).hexdigest()
-    return frame
+    with _strict_fp32_backends() as numeric_contract:
+        device, device_name = _device_contract()
+        execution = context.config.get("execution", {})
+        if not isinstance(execution, Mapping):
+            raise TypeError("execution configuration must be a mapping")
+        precision = str(execution.get("precision", "fp32"))
+        dataset = str(job["dataset"])
+        model_id = str(job["model_id"])
+        bare_model = _active_model(model_id, dataset, device, precision)
+        model = _runtime_model(bare_model, model_id, dataset)
+        samples = _selected_samples(
+            context,
+            dataset,
+            model_id,
+            model,
+            device=device,
+            precision=precision,
+        )
+        start, stop = int(job["image_start"]), int(job["image_stop"])
+        selected = samples[start:stop]
+        if len(selected) != int(job["image_count"]):
+            raise RuntimeError("fixed sample selection does not cover the member image range")
+        kind = str(job["kind"])
+        if kind in {
+            "shared_deletion_targets",
+            "shared_part_deletion_targets",
+            "shared_heldout_targets",
+        }:
+            frame = _target_frame(job, selected, model, device=device, precision=precision)
+        elif kind in {"timing", "large_model_timing"}:
+            frame = _timing_frame(job, selected, model, device=device, precision=precision)
+        else:
+            frame = _quality_frame(job, selected, model, device=device, precision=precision)
+        torch = _torch()
+        raw_checkpoint_assets = tuple(getattr(bare_model, "decaf_checkpoint_assets", ()))
+        if not raw_checkpoint_assets:
+            raise RuntimeError("real attribution model lacks checkpoint lineage")
+        checkpoint_assets = tuple(
+            {
+                "checkpoint_id": str(asset["checkpoint_id"]),
+                "sha256": str(asset["sha256"]),
+                "bytes": int(asset["bytes"]),
+            }
+            for asset in raw_checkpoint_assets
+        )
+        checkpoint_json = json.dumps(
+            checkpoint_assets, sort_keys=True, separators=(",", ":")
+        )
+        frame["runtime_device"] = device
+        frame["runtime_device_name"] = device_name
+        frame["runtime_precision"] = precision
+        frame["runtime_torch_version"] = str(torch.__version__)
+        frame["runtime_cuda_version"] = str(torch.version.cuda)
+        frame["runtime_cuda_matmul_allow_tf32"] = numeric_contract[
+            "cuda_matmul_allow_tf32"
+        ]
+        frame["runtime_cudnn_allow_tf32"] = numeric_contract["cudnn_allow_tf32"]
+        frame["checkpoint_assets_json"] = checkpoint_json
+        frame["checkpoint_assets_sha256"] = hashlib.sha256(
+            checkpoint_json.encode("utf-8")
+        ).hexdigest()
+        return frame
 
 
 def validate_checkpoint_fingerprint_rows(

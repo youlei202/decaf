@@ -95,8 +95,14 @@ def reveal_sequence(
     blur_sigma: float,
     patch_grid: tuple[int, int],
     patch_seed: int,
+    patch_orders: Mapping[str, Sequence[int]] | None = None,
 ) -> tuple[Any, Any]:
-    """Return stage-major paired states with one shared neutral and patch order."""
+    """Return stage-major paired states with one shared neutral and patch order.
+
+    ``patch_orders`` is an identity-preserving interface for exact replays. If
+    supplied, it maps each pair id to a complete patch-index permutation and
+    replaces deterministic order generation without changing reveal semantics.
+    """
 
     import torch
 
@@ -127,17 +133,32 @@ def reveal_sequence(
         height, width = map(int, plus.shape[-2:])
         y_edges = [(index * height) // rows for index in range(rows + 1)]
         x_edges = [(index * width) // columns for index in range(columns + 1)]
-        orders = [
-            _patch_order(
-                plus[index],
-                minus[index],
-                pair_id=str(pair_id),
-                label=label,
-                seed=int(patch_seed),
-                grid=patch_grid,
-            )
-            for index, pair_id in enumerate(pair_ids)
-        ]
+        if patch_orders is None:
+            orders = [
+                _patch_order(
+                    plus[index],
+                    minus[index],
+                    pair_id=str(pair_id),
+                    label=label,
+                    seed=int(patch_seed),
+                    grid=patch_grid,
+                )
+                for index, pair_id in enumerate(pair_ids)
+            ]
+        else:
+            expected = set(range(rows * columns))
+            orders = []
+            for pair_id in pair_ids:
+                key = str(pair_id)
+                if key not in patch_orders:
+                    raise KeyError(f"explicit patch order is missing pair id: {key}")
+                order = tuple(int(index) for index in patch_orders[key])
+                if len(order) != rows * columns or set(order) != expected:
+                    raise ValueError(
+                        f"explicit patch order for {key} must be a complete "
+                        f"{rows * columns}-index permutation"
+                    )
+                orders.append(order)
         for position in positions:
             count = math.floor(rows * columns * position + 1.0e-12)
             mask = torch.zeros(

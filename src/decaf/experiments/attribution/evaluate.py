@@ -451,7 +451,7 @@ def oracle_member(job: Mapping[str, Any], _context: RunContext) -> pd.DataFrame:
             grid[:, None] * endpoint[None, :] + np.sin(np.pi * grid)[:, None] * profile[None, :]
         )
         scores = decaf_trajectory("decaf_5", grid, response, endpoint, axis=0)
-        patch_scores = np.asarray(scores["signed_E"], dtype=np.float64)
+        patch_scores = np.asarray(scores["E"], dtype=np.float64)
         quality = float(row_spearman(patch_scores, endpoint)[0])
         rows.append(
             {

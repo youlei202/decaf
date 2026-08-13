@@ -541,6 +541,19 @@ def _scan_frame(
     positions = tuple(map(float, settings["alpha"]))
     pair_batch = max(1, int(settings["attribution_pair_batch_size"]))
     inference_batch = int(settings["inference_batch_size"])
+    reveal_path = str(member["reveal_path"])
+    explicit_orders: Mapping[str, Sequence[int]] | None = None
+    registered_orders = settings.get("explicit_patch_orders")
+    if registered_orders is not None:
+        if not isinstance(registered_orders, Mapping):
+            raise TypeError("explicit_patch_orders must map reveal paths to pair orders")
+        selected_orders = registered_orders.get(reveal_path)
+        if reveal_path in {"patch_A", "patch_B"} and selected_orders is None:
+            raise KeyError(f"explicit patch orders are missing reveal path: {reveal_path}")
+        if selected_orders is not None:
+            if not isinstance(selected_orders, Mapping):
+                raise TypeError(f"explicit patch orders for {reveal_path} must be a mapping")
+            explicit_orders = selected_orders
     for batch in _pair_batches(pairs, pair_batch):
         plus, minus, targets = _preprocessed_endpoints(
             batch, assets=assets, settings=settings, torch=torch
@@ -549,11 +562,12 @@ def _scan_frame(
             plus,
             minus,
             pair_ids=batch["pair_id"].astype(str).tolist(),
-            path=str(member["reveal_path"]),
+            path=reveal_path,
             alpha=positions,
             blur_sigma=float(settings["blur_sigma"]),
             patch_grid=tuple(map(int, settings["patch_grid"])),
             patch_seed=int(settings["patch_seed"]),
+            patch_orders=explicit_orders,
         )
         plus_probabilities, minus_probabilities = _paired_stage_probabilities(
             model,
@@ -577,7 +591,7 @@ def _scan_frame(
                         "pair_id": str(pair["pair_id"]),
                         "pair_type": str(pair["pair_type"]),
                         "model_id": str(member["model_id"]),
-                        "reveal_path": str(member["reveal_path"]),
+                        "reveal_path": reveal_path,
                         "stage_index": stage_index,
                         "alpha": position,
                         "response": float(responses[stage_index, pair_index]),

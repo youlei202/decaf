@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -10,7 +11,25 @@ from decaf.core.receipts import write_member_receipt
 from decaf.experiments.attribution.evaluate import (
     _validate_completed_member,
     atomic_parquet,
+    oracle_member,
 )
+
+
+def test_oracle_primary_scores_are_unsigned_e_for_negative_endpoints() -> None:
+    frame = oracle_member({"scope": "oracle", "method_id": "decaf_5"}, None)
+
+    saw_negative_endpoint_with_positive_e = False
+    for row in frame.itertuples(index=False):
+        patch_scores = np.asarray(row.patch_scores, dtype=np.float64)
+        unsigned_e = np.asarray(row.decaf_E, dtype=np.float64)
+        endpoint = np.asarray(row.endpoint_effects, dtype=np.float64)
+        np.testing.assert_allclose(patch_scores, unsigned_e, rtol=0.0, atol=0.0)
+        assert bool((patch_scores >= 0.0).all())
+        saw_negative_endpoint_with_positive_e |= bool(
+            ((endpoint < 0.0) & (patch_scores > 0.0)).any()
+        )
+
+    assert saw_negative_endpoint_with_positive_e
 
 
 def test_resume_rejects_stale_downstream_dependency_after_target_recompute(

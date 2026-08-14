@@ -4,77 +4,147 @@
 
 ### Decomposition of Evidence, Contradiction, and Fragility in Perturbation Responses
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![arXiv](https://img.shields.io/badge/arXiv-2608.12935-b31b1b.svg)](https://arxiv.org/abs/2608.12935)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+
 **Response magnitude tells you how much a model reacts. DECAF tells you what kind of response produced it.**
 
-[Paper](https://cspaper.org/openprint/20260813.0001v1) · [Quick start](#quick-start) · [Reproduce the paper](#reproduce-the-paper) · [Documentation](#documentation)
+[Paper](https://arxiv.org/abs/2608.12935) · [Quick start](#quick-start) · [How it works](#decaf-at-a-glance) · [Reproduce the paper](#reproduce-the-paper)
 
 </div>
 
-<!-- Add an online-demo link here when a public demo is available. -->
-<!-- Add a PyPI installation badge and command after the first package release. -->
+<!-- Add a PyPI badge and `pip install ...` command after the first public package release. -->
+<!-- Add an online-demo badge/link here once a public demo is available. -->
 
-## Why DECAF?
+---
 
-Perturbation and counterfactual methods often reduce a model response to one number: **how much the prediction changed**. Equal response magnitudes, however, can describe very different behavior.
+## What is DECAF?
 
-Given a factual endpoint $x^+$, a counterfactual endpoint $x^-$, and matched reveal trajectories $x^+(t)$ and $x^-(t)$, DECAF observes
+Perturbation and counterfactual methods often reduce a model response to one number: **how much the prediction changed**.
 
-$$
-r(t) = q(x^+(t)) - q(x^-(t)), \qquad d = r(1),
-$$
+That magnitude can hide very different behavior. The same response size may:
 
-where $q$ is any scalar model score. The clean endpoint determines whether the final contrast is active and, when active, which direction counts as support:
+- support the model's final factual–counterfactual difference;
+- oppose that final difference;
+- become large along the perturbation path even though the final endpoints differ very little.
 
-$$
-a = \mathbf{1}\{|d| \geq \varepsilon\}, \qquad s = \mathrm{sign}(d).
-$$
-
-DECAF then routes every stage response into three nonnegative components:
-
-$$
-e(t) = a\,[s r(t)]_+, \qquad
-c(t) = a\,[-s r(t)]_+, \qquad
-f(t) = (1-a)|r(t)|.
-$$
+**DECAF** resolves this ambiguity by decomposing a paired perturbation response into three nonnegative components:
 
 | Component | Meaning |
 |---|---|
-| **Evidence — $E$** | Response aligned with the final factual–counterfactual effect |
-| **Contradiction — $C$** | Response opposed to the final effect |
-| **Fragility — $F$** | Response along the path when the final effect is negligible |
+| **Evidence — `E`** | Response aligned with the final factual–counterfactual effect |
+| **Contradiction — `C`** | Response opposed to the final effect |
+| **Fragility — `F`** | Response along the path when the final endpoint effect is negligible |
 
-The routing is lossless:
+The decomposition is lossless:
 
-$$
-|r(t)| = e(t) + c(t) + f(t), \qquad \mathrm{Abs} = E + C + F.
-$$
+\[
+\mathrm{Abs} = E + C + F.
+\]
 
-DECAF therefore preserves ordinary response magnitude while revealing which kind of response produced it.
+So DECAF does not discard ordinary response magnitude. It **refines** it.
 
-## What DECAF requires
+---
 
-DECAF begins after a paired intervention has been specified. You provide:
+## DECAF at a glance
 
-1. a scalar score $q$ to explain;
-2. a meaningful factual–counterfactual pair $(x^+, x^-)$;
-3. matched reveal trajectories from a common uninformative state to those endpoints;
-4. a threshold $\varepsilon$ expressed on the same scale as the score.
+```mermaid
+flowchart LR
+    X0["Uninformative state<br/>x₀"]
 
-DECAF does **not** choose the counterfactual or reveal path for you. Its semantics are relative to the score, pair, path, stage measure, and threshold that you specify.
+    X0 --> XP["Factual reveal<br/>x⁺(t)"]
+    X0 --> XM["Counterfactual reveal<br/>x⁻(t)"]
 
-Once the paired scores are available, the decomposition:
+    XP --> R["Signed stage response<br/>r(t)=q(x⁺(t))−q(x⁻(t))"]
+    XM --> R
 
-- requires no gradients, parameters, or internal activations;
-- adds no model queries beyond the paired trajectory;
-- works with neural networks, tree ensembles, simulators, and remote score APIs;
-- supports batching across examples, stages, factors, paths, and models;
-- can be accumulated online with constant additional memory per active batch.
+    XP --> EP["Endpoint x⁺"]
+    XM --> EM["Endpoint x⁻"]
+
+    EP --> D["Final contrast<br/>d=q(x⁺)−q(x⁻)"]
+    EM --> D
+
+    D --> G["Endpoint reference<br/>a=1{|d|≥ε}<br/>s=sign(d)"]
+    R --> Z["Orient response<br/>z(t)=s·r(t)"]
+    G --> Z
+
+    Z --> ROUTE{"Semantic routing"}
+    G --> ROUTE
+
+    ROUTE -->|"a=1, z(t)>0"| E["Evidence<br/>endpoint-aligned"]
+    ROUTE -->|"a=1, z(t)<0"| C["Contradiction<br/>endpoint-opposed"]
+    ROUTE -->|"a=0"| F["Fragility<br/>endpoint-null"]
+
+    E --> A["Lossless summary<br/>Abs = E + C + F"]
+    C --> A
+    F --> A
+
+    classDef evidence fill:#eaf4ff,stroke:#2676b8,color:#123;
+    classDef contradiction fill:#fff0ef,stroke:#c94a43,color:#321;
+    classDef fragility fill:#f6efff,stroke:#7a4db3,color:#213;
+    classDef endpoint fill:#fff8df,stroke:#b88b20,color:#321;
+    classDef neutral fill:#f5f5f5,stroke:#777,color:#222;
+
+    class E evidence;
+    class C contradiction;
+    class F fragility;
+    class G endpoint;
+    class X0,R,Z,ROUTE,A neutral;
+```
+
+For a scalar model score \(q\), paired reveal trajectories \(x^+(t)\) and \(x^-(t)\) produce
+
+\[
+r(t)=q(x^+(t))-q(x^-(t)),
+\qquad
+d=r(1).
+\]
+
+With a practical endpoint threshold \(\varepsilon>0\),
+
+\[
+a=\mathbf{1}\{|d|\geq\varepsilon\},
+\qquad
+s=\operatorname{sign}(d),
+\qquad
+z(t)=s\,r(t).
+\]
+
+DECAF routes the response as
+
+\[
+e(t)=a[z(t)]_+,
+\qquad
+c(t)=a[-z(t)]_+,
+\qquad
+f(t)=(1-a)|r(t)|.
+\]
+
+The finite-grid implementation then integrates these pointwise components over reveal stages.
+
+---
+
+## Why use DECAF?
+
+DECAF is deliberately lightweight.
+
+- **Forward-only.** No gradients, backward passes, or internal activations are required.
+- **Model-agnostic.** It works with neural networks, tree ensembles, simulators, or remote score APIs.
+- **Lossless.** Ordinary magnitude is recovered exactly as `Abs = E + C + F`.
+- **Batch-friendly.** Examples, stages, factors, paths, repetitions, and models are independent batching dimensions.
+- **No learned explainer.** DECAF does not require fitting a separate explanation model.
+- **Protocol-explicit.** The factual–counterfactual pair, reveal path, score, stage measure, and endpoint threshold remain explicit.
+
+DECAF begins **after** a paired intervention has been specified. It does not choose the counterfactual or reveal path for you.
+
+---
 
 ## Quick start
 
 ### 1. Install from source
 
-A PyPI release is not available yet. The current repository can be used directly with Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/):
+A PyPI release is not available yet.
 
 ```bash
 git clone https://github.com/youlei202/decaf.git
@@ -82,16 +152,16 @@ cd decaf
 uv sync
 ```
 
-### 2. Decompose paired score trajectories
+Python 3.11 or newer is recommended.
 
-The example below contains three paired trajectories: an evidence-dominant response, a response with substantial contradiction, and an endpoint-null fragile response.
+### 2. Decompose paired score trajectories
 
 ```python
 import numpy as np
 
 from decaf.core import trajectory_scores
 
-# Five matched reveal stages from the common start (t=0) to clean endpoints (t=1).
+# Reveal stages from a common uninformative state to the clean endpoints.
 t = np.array([0.00, 0.25, 0.50, 0.75, 1.00])
 
 # Rows are paired examples; columns are reveal stages.
@@ -102,6 +172,7 @@ q_plus = np.array(
         [0.50, 0.70, 0.40, 0.65, 0.505],
     ]
 )
+
 q_minus = np.array(
     [
         [0.50, 0.45, 0.40, 0.35, 0.400],
@@ -110,42 +181,23 @@ q_minus = np.array(
     ]
 )
 
-response = q_plus - q_minus
 result = trajectory_scores(
     grid=t,
-    response=response,
+    response=q_plus - q_minus,
     epsilon=0.02,
 )
 
-summary = {
-    name: np.round(result[name], 4).tolist()
-    for name in ("M", "E", "C", "F", "Abs")
-}
-print(summary)
+for name in ("M", "E", "C", "F", "Abs"):
+    print(name, np.round(result[name], 4))
+
 assert result["numeric_audit"]["passed"]
 ```
 
-Expected output:
-
-```text
-{
-  'M':   [0.5, 0.4, 0.01],
-  'E':   [0.25, 0.075, 0.0],
-  'C':   [0.0, 0.125, 0.0],
-  'F':   [0.0, 0.0, 0.1887],
-  'Abs': [0.25, 0.2, 0.1887]
-}
-```
-
-Run the example with:
-
-```bash
-uv run python example.py
-```
+The three rows illustrate an evidence-dominant response, a response containing contradiction, and an endpoint-null fragile response.
 
 ### 3. Connect DECAF to your own model
 
-The model-facing part is deliberately small. Evaluate the same scalar score on the two matched branches at every reveal stage, then pass their difference to DECAF:
+The model-facing part is small: evaluate the **same scalar score** on matched factual and counterfactual branches at every reveal stage.
 
 ```python
 plus_scores = []
@@ -165,57 +217,92 @@ result = trajectory_scores(
 )
 ```
 
-For stochastic models or stochastic reveal protocols, use shared randomness across the factual and counterfactual branches whenever possible.
+For stochastic models or stochastic reveal protocols, factual and counterfactual branches should share randomness whenever possible.
 
-## Output fields
+---
 
-`trajectory_scores(...)` returns per-example endpoint and trajectory summaries:
+## What DECAF requires
 
-| Field | Description |
+A DECAF analysis needs four ingredients:
+
+1. **Score** — a scalar model score \(q\);
+2. **Pair** — a meaningful factual–counterfactual pair \((x^+,x^-)\);
+3. **Path** — matched reveal trajectories \(x^+(t)\) and \(x^-(t)\);
+4. **Threshold** — an endpoint threshold \(\varepsilon\) on the same scale as the score.
+
+Examples of valid scores include:
+
+- probabilities;
+- logits;
+- margins;
+- regression values;
+- rewards or action values;
+- any stable real-valued black-box score.
+
+Hard labels are formally sufficient, but richer real-valued scores are usually more informative.
+
+---
+
+## Interpreting the output
+
+`trajectory_scores(...)` returns per-example endpoint and trajectory summaries.
+
+| Field | Meaning |
 |---|---|
-| `M` | Clean endpoint magnitude $|d|$ |
+| `M` | Clean endpoint magnitude \(|d|\) |
 | `E` | Integrated endpoint-aligned evidence |
 | `C` | Integrated endpoint-opposed contradiction |
 | `F` | Integrated endpoint-null fragility |
-| `Abs` | Integrated ordinary magnitude; exactly $E+C+F$ up to numerical tolerance |
-| `Net` | Signed oriented mass, $E-C$ |
+| `Abs` | Integrated ordinary magnitude |
+| `Net` | Oriented signed mass, `E - C` |
 | `signed_E` | Evidence restored to the endpoint score direction |
-| `endpoint_delta` | Signed clean endpoint contrast $d$ |
-| `endpoint_active` | Whether $|d| \geq \varepsilon$ |
-| `pointwise_components` | Stage-wise decomposition and endpoint metadata |
+| `endpoint_delta` | Signed endpoint contrast \(d\) |
+| `endpoint_active` | Whether \(|d| \ge \varepsilon\) |
+| `pointwise_components` | Stage-wise DECAF routing |
 | `numeric_audit` | Pointwise and integrated conservation checks |
 
-The core package also exposes:
+The core package also exposes lower-level utilities for pointwise decomposition, finite-grid integration, streaming accumulation, bootstrap summaries, and reproducibility audits.
 
-- `decompose(...)` for pointwise routing;
-- `integrate_components(...)` for finite-grid integration;
-- `StreamingDECAFAccumulator` for stage-by-stage accumulation;
-- bootstrap, metric, manifest, and run-receipt utilities used by the experiments.
+---
 
 ## Choosing the endpoint threshold
 
-The threshold $\varepsilon$ is not universal. It must be chosen on the scale of the score being analyzed.
+The threshold \(\varepsilon\) is **not universal**.
 
-The paper uses $\varepsilon=0.02$ for true-class probabilities in the main ImageNet-9 audit. Logits, margins, regression values, rewards, and other scores generally require a different threshold. We recommend reporting:
+The paper uses \(\varepsilon=0.02\) for true-class probabilities in the main ImageNet-9 analysis. Other score spaces generally require different numerical thresholds.
+
+We recommend reporting:
 
 - the score definition and direction;
 - the chosen threshold;
 - the endpoint-active fraction;
-- a small threshold-sensitivity sweep when conclusions depend on branch membership.
+- a small threshold-sensitivity sweep when branch membership matters.
 
-Under positive score rescaling, rescale $\varepsilon$ by the same factor to preserve gate membership.
+If the score is positively rescaled, the threshold should be rescaled by the same factor to preserve gate membership.
 
-## What the paper finds
+---
 
-The experiments test DECAF across controlled vision, natural images, tabular models, external attribution benchmarks, and a large vision transformer.
+## Highlights from the paper
 
-| Question | Main finding |
-|---|---|
-| Can equal magnitudes hide different behavior? | In a 72-model ImageNet-9 audit with nearly matched ordinary magnitudes, response-role agreement rises from **0.350** for magnitude alone to **0.964** with DECAF. |
-| What changes when only the reveal path changes? | A patch reveal increases total response by about **1.8×**; evidence changes little, while fragility grows by more than **4×**. |
-| Does the forward-only design scale? | On a 1B-scale DINOv2 model, DECAF-5 reaches nearly the same attribution quality as IG-32 with **4.75× lower wall time** and **2.36× lower peak memory**. |
+DECAF is evaluated across controlled vision, natural images, tabular models, external attribution benchmarks, and a large vision transformer.
 
-Read the full methods, assumptions, experiments, and boundary cases in the [paper](https://cspaper.org/openprint/20260813.0001v1).
+- **Same magnitude, different semantics.**  
+  In a 72-model ImageNet-9 audit with nearly matched ordinary response magnitude, DECAF's dominant component agrees with independently observed behavior in **96.4%** of cases, compared with **35.0%** for magnitude alone.
+
+- **Reveal-path diagnostics.**  
+  Changing only the reveal path increases total response by nearly **80%**, while evidence changes little and fragility grows by more than **4×**.
+
+- **Forward-only scaling.**  
+  On a 1B-scale DINOv2 model, a short DECAF trajectory matches a strong gradient-based baseline while using **4.75× lower wall time** and **2.36× lower peak memory**.
+
+- **Cross-model behavioral validation.**  
+  Evidence, contradiction, and fragility track independently measured preservation, inversion, and endpoint-null sensitivity across neural, linear, and tree-based models.
+
+Read the paper for the complete experimental protocols, baselines, statistical tests, and boundary cases:
+
+**[arXiv:2608.12935](https://arxiv.org/abs/2608.12935)**
+
+---
 
 ## Reproduce the paper
 
@@ -223,10 +310,10 @@ The repository contains four experiment families:
 
 - controlled 3D Shapes mechanisms;
 - ImageNet-9 paired-background audits;
-- FunnyBirds, ImageNet-1k, PartImageNet, and DINOv2 attribution experiments;
+- attribution benchmarks on FunnyBirds, ImageNet-1k, PartImageNet, and DINOv2;
 - the Covertype tabular benchmark.
 
-Install the development dependencies and run the CPU verification suite:
+Install all experiment dependencies and run the CPU verification suite:
 
 ```bash
 uv sync --all-extras
@@ -242,7 +329,7 @@ export DECAF_RESULTS_ROOT=/path/to/results
 export DECAF_REFERENCE_RUNS_ROOT=/path/to/sealed/reference/runs
 ```
 
-Analysis replay and paper-asset generation:
+Replay the stored analysis and regenerate paper assets:
 
 ```bash
 bash scripts/reproduce/controlled.sh \
@@ -266,7 +353,7 @@ bash scripts/reproduce/verify.sh --mode analysis-replay
 
 The stored analysis replay does not perform model inference. Full vision training and inference require the datasets and checkpoints described in the documentation, together with suitable GPU hardware.
 
-The CPU verification suite exercises the common core, a real Covertype shard, result schemas, and static audits of the full experiment plans. The representative B200 verification records real execution shards and runtime contracts; it does not claim a complete paper-scale rerun. Sealed historical outputs remain the source of the regenerated paper values.
+---
 
 ## Documentation
 
@@ -277,19 +364,23 @@ The CPU verification suite exercises the common core, a real Covertype shard, re
 - [Verification scope](docs/verification.md)
 - [Result schema](docs/result_schema.md)
 
+---
+
 ## Repository layout
 
 ```text
 src/decaf/core/          Reusable DECAF decomposition and numerical primitives
 src/decaf/experiments/   Controlled, ImageNet-9, attribution, and Covertype pipelines
 src/decaf/paper/         Reference replay and paper-asset generation
-configs/                  Smoke, integration, and paper experiment profiles
-manifests/                Dataset, checkpoint, and reference-run contracts
-scripts/reproduce/        Stable verification and reproduction entry points
-docs/                     Data, hardware, schema, and reproduction documentation
-tests/                    Unit, integration, and regression tests
-paper/                    Visual manifests and generated-asset targets
+configs/                 Smoke, integration, and paper experiment profiles
+manifests/               Dataset, checkpoint, and reference-run contracts
+scripts/reproduce/       Stable verification and reproduction entry points
+docs/                    Data, hardware, schema, and reproduction documentation
+tests/                   Unit, integration, and regression tests
+paper/                   Visual manifests and generated-asset targets
 ```
+
+---
 
 ## Development
 
@@ -299,19 +390,25 @@ uv run pytest
 uv run ruff check .
 ```
 
-The implementation promotes response arrays to `float64` before endpoint classification and identity checks. Tests cover conservation, endpoint-swap invariance, score scaling, finite-grid/streaming agreement, validation failures, schemas, experiment contracts, and paper replay.
+The implementation promotes response arrays to `float64` before endpoint classification and identity checks. Tests cover conservation, endpoint-swap invariance, score scaling, finite-grid/streaming agreement, validation failures, experiment contracts, and paper replay.
+
+---
 
 ## Citation
+
+If you use DECAF in your work, please cite the arXiv version:
 
 ```bibtex
 @article{you2026decaf,
   title   = {DECAF: Decomposition of Evidence, Contradiction, and Fragility in Perturbation Responses},
   author  = {You, Lei},
+  journal = {arXiv preprint arXiv:2608.12935},
   year    = {2026},
-  note    = {Preprint},
-  url     = {https://cspaper.org/openprint/20260813.0001v1}
+  url     = {https://arxiv.org/abs/2608.12935}
 }
 ```
+
+---
 
 ## License
 

@@ -39,9 +39,9 @@ That magnitude can hide very different behavior. The same response size may:
 
 The decomposition is lossless:
 
-\[
+$$
 \mathrm{Abs} = E + C + F.
-\]
+$$
 
 So DECAF does not discard ordinary response magnitude. It **refines** it.
 
@@ -95,31 +95,31 @@ flowchart LR
 
 For a scalar model score \(q\), paired reveal trajectories \(x^+(t)\) and \(x^-(t)\) produce
 
-\[
+$$
 r(t)=q(x^+(t))-q(x^-(t)),
 \qquad
 d=r(1).
-\]
+$$
 
 With a practical endpoint threshold \(\varepsilon>0\),
 
-\[
+$$
 a=\mathbf{1}\{|d|\geq\varepsilon\},
 \qquad
-s=\operatorname{sign}(d),
+s=\mathrm{sign}(d),
 \qquad
 z(t)=s\,r(t).
-\]
+$$
 
 DECAF routes the response as
 
-\[
+$$
 e(t)=a[z(t)]_+,
 \qquad
 c(t)=a[-z(t)]_+,
 \qquad
 f(t)=(1-a)|r(t)|.
-\]
+$$
 
 The finite-grid implementation then integrates these pointwise components over reveal stages.
 

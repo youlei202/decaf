@@ -396,17 +396,7 @@ The implementation promotes response arrays to `float64` before endpoint classif
 
 ## Citation
 
-If you use DECAF in your work, please cite the arXiv version:
-
-```bibtex
-@article{you2026decaf,
-  title   = {DECAF: Decomposition of Evidence, Contradiction, and Fragility in Perturbation Responses},
-  author  = {You, Lei},
-  journal = {arXiv preprint arXiv:2608.12935},
-  year    = {2026},
-  url     = {https://arxiv.org/abs/2608.12935}
-}
-```
+To be done
 
 ---
 

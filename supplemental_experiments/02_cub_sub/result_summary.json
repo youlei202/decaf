@@ -1,0 +1,780 @@
+{
+  "analysis_source_sha256": "8da51b14115bc328cab72bbc5d67c1daf5779ec116e80c5fe65189ba6b34a4e8",
+  "change_tolerance": 0.2,
+  "complete": true,
+  "conservation_max_error": 1.1102230246251565e-16,
+  "endpoint_active": 1775,
+  "endpoint_null": 329,
+  "epsilon": 0.02,
+  "incomplete_smoke": false,
+  "inference_receipt": {
+    "artifact_sha256": {
+      "config.json": "b211bcc37c2c53baa61478a4483648224cb62d940ac202a1c71c0318137aa1cb",
+      "environment.json": "f1e461a1f9db4232ebc3e4fc3ff0c78493fc0e18a79fc1962ce6e4b96521f11c",
+      "evaluated_images.json": "09e0213d5865ffb3bd3ade9a5e8973f6a107dac54b54dd4c6a46f7a9d2cf09f6",
+      "evaluated_pairs.json": "5de2073782203574a8cf4bebff58c3f04a9f139fe00ba9aac3e05610d99fd9f2",
+      "paired_scores.npz": "5be79548c46dde549e2b8c9575dad57b76d6bcb5702139351576f288a2db5b68",
+      "single_image_scores.npz": "70a773c0817b9065b442c0a4b8d4f6d630b30bfb7c51304e1b864c5ea94bdbc5"
+    },
+    "complete": true,
+    "elapsed_seconds_this_invocation": 136.4583974359557,
+    "images": 3072,
+    "incomplete_smoke": false,
+    "pairs": 2104,
+    "query_frames_for_complete_run": 53232,
+    "resumable_pair_cache": true,
+    "run_identity": "b211bcc37c2c53baa61478a4483648224cb62d940ac202a1c71c0318137aa1cb"
+  },
+  "inference_run_identity": "b211bcc37c2c53baa61478a4483648224cb62d940ac202a1c71c0318137aa1cb",
+  "input_artifact_sha256": {
+    "config.json": "b211bcc37c2c53baa61478a4483648224cb62d940ac202a1c71c0318137aa1cb",
+    "environment.json": "f1e461a1f9db4232ebc3e4fc3ff0c78493fc0e18a79fc1962ce6e4b96521f11c",
+    "evaluated_images.json": "09e0213d5865ffb3bd3ade9a5e8973f6a107dac54b54dd4c6a46f7a9d2cf09f6",
+    "evaluated_pairs.json": "5de2073782203574a8cf4bebff58c3f04a9f139fe00ba9aac3e05610d99fd9f2",
+    "paired_scores.npz": "5be79548c46dde549e2b8c9575dad57b76d6bcb5702139351576f288a2db5b68",
+    "single_image_scores.npz": "70a773c0817b9065b442c0a4b8d4f6d630b30bfb7c51304e1b864c5ea94bdbc5"
+  },
+  "limitations": [
+    "SUB is synthetic imagery based on CUB bird/attribute semantics, not original real-photo edits.",
+    "Paired endpoints share bird class and attribute group but are different generated instances; nuisance factors can change.",
+    "Targets use held-out endpoint transformations; labels are intended SUB attributes, not manually reverified image attributes.",
+    "Endpoint gating is shared with the representation; all score comparisons use identical subsets.",
+    "No causal single-factor isolation or advantage over baselines is assumed.",
+    "Existing CLIP pretraining may include CUB bird concepts; no SUB images are used for fitting."
+  ],
+  "model": "ViT-B-32",
+  "model_state_sha256": "5d7fcb40c8ff465573438f9a4bb3151eceead29102cb0e05a1f54b5c403ba976",
+  "null_F_equals_Abs_max_error": 0.0,
+  "pair_type": "same_class_group_cross_instance",
+  "pairs": 2104,
+  "posthoc_direction_control": {
+    "description": "After inspecting the initial results, we added -Abs and -M uniformly to every reported outcome/population. This is a disclosed sensitivity analysis, not a prespecified direction choice or a held-out fitted predictor.",
+    "original_analysis_archive": "analysis_prespecified/",
+    "original_positive_score_results_preserved": true,
+    "reason": "Low endpoint margins can predict reversal; comparing only positive magnitude scores would overstate evidence for additional information in C."
+  },
+  "pretrained": "laion2b_s34b_b79k",
+  "primary_auc_differences": [
+    {
+      "analysis_status": "prespecified_comparison",
+      "auroc_difference": 0.00021445098230143955,
+      "baseline": "Abs",
+      "ci_high": 0.0006733880054554052,
+      "ci_low": -0.00024020650704288383,
+      "component": "E",
+      "population": "all_pairs",
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "prespecified_comparison",
+      "auroc_difference": -0.023873610705393178,
+      "baseline": "M",
+      "ci_high": -0.014573016426114959,
+      "ci_low": -0.03460908389522548,
+      "component": "E",
+      "population": "all_pairs",
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc_difference": 0.6896059666059249,
+      "baseline": "negative_Abs",
+      "ci_high": 0.7454083779624818,
+      "ci_low": 0.6307729546933464,
+      "component": "E",
+      "population": "all_pairs",
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc_difference": 0.7136940282936193,
+      "baseline": "negative_M",
+      "ci_high": 0.7667056685874959,
+      "ci_low": 0.6651189840855696,
+      "component": "E",
+      "population": "all_pairs",
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "prespecified_comparison",
+      "auroc_difference": 0.6636245639652795,
+      "baseline": "Abs",
+      "ci_high": 0.7827811379401447,
+      "ci_low": 0.47754490496786267,
+      "component": "C",
+      "population": "endpoint_active",
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "prespecified_comparison",
+      "auroc_difference": 0.7420296909223655,
+      "baseline": "M",
+      "ci_high": 0.8535131851877429,
+      "ci_low": 0.595963973815593,
+      "component": "C",
+      "population": "endpoint_active",
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc_difference": 0.055041778210432435,
+      "baseline": "negative_Abs",
+      "ci_high": 0.17865396410771123,
+      "ci_low": -0.09008094685242511,
+      "component": "C",
+      "population": "endpoint_active",
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc_difference": -0.02336334874665369,
+      "baseline": "negative_M",
+      "ci_high": 0.10272614035903976,
+      "ci_low": -0.18582470741370247,
+      "component": "C",
+      "population": "endpoint_active",
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "prespecified_comparison",
+      "auroc_difference": 0.0,
+      "baseline": "Abs",
+      "ci_high": 0.0,
+      "ci_low": 0.0,
+      "component": "F",
+      "population": "endpoint_null",
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "prespecified_comparison",
+      "auroc_difference": 0.04655109154283632,
+      "baseline": "M",
+      "ci_high": 0.11882846326657484,
+      "ci_low": -0.02589586814637216,
+      "component": "F",
+      "population": "endpoint_null",
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc_difference": 0.21500642084021288,
+      "baseline": "negative_Abs",
+      "ci_high": 0.4087925510752872,
+      "ci_low": 0.005549900757002056,
+      "component": "F",
+      "population": "endpoint_null",
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc_difference": 0.16845532929737667,
+      "baseline": "negative_M",
+      "ci_high": 0.37079419193716084,
+      "ci_low": -0.021949260037195176,
+      "component": "F",
+      "population": "endpoint_null",
+      "target": "offpath_instability"
+    }
+  ],
+  "primary_metric_rows": [
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.8449102087941132,
+      "bird_clusters": 33,
+      "ci_high": 0.8727802068941599,
+      "ci_low": 0.8154488303525427,
+      "method": "E",
+      "n": 2104,
+      "population": "all_pairs",
+      "positive": 558,
+      "spearman": 0.5284509168876855,
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.4753010428113713,
+      "bird_clusters": 33,
+      "ci_high": 0.48848442015866544,
+      "ci_low": 0.46222040699502176,
+      "method": "C",
+      "n": 2104,
+      "population": "all_pairs",
+      "positive": 558,
+      "spearman": -0.07490687773491433,
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.3935963777490298,
+      "bird_clusters": 33,
+      "ci_high": 0.42039082433829295,
+      "ci_low": 0.36538256503196814,
+      "method": "F",
+      "n": 2104,
+      "population": "all_pairs",
+      "positive": 558,
+      "spearman": -0.2574087660330493,
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.8446957578118117,
+      "bird_clusters": 33,
+      "ci_high": 0.8726281710683219,
+      "ci_low": 0.8153241243408036,
+      "method": "Abs",
+      "n": 2104,
+      "population": "all_pairs",
+      "positive": 558,
+      "spearman": 0.5271117768292486,
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.8687838194995063,
+      "bird_clusters": 33,
+      "ci_high": 0.8933902788811919,
+      "ci_low": 0.8458668510334941,
+      "method": "M",
+      "n": 2104,
+      "population": "all_pairs",
+      "positive": 558,
+      "spearman": 0.563947452084368,
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.8690863692637261,
+      "bird_clusters": 33,
+      "ci_high": 0.893581358713607,
+      "ci_low": 0.8461926843524809,
+      "method": "signed_endpoint",
+      "n": 2104,
+      "population": "all_pairs",
+      "positive": 558,
+      "spearman": 0.5644101138380536,
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.8449959891870336,
+      "bird_clusters": 33,
+      "ci_high": 0.8727193262683872,
+      "ci_low": 0.8162792081063567,
+      "method": "signed_net",
+      "n": 2104,
+      "population": "all_pairs",
+      "positive": 558,
+      "spearman": 0.5275708932821397,
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc": 0.15530424218818825,
+      "bird_clusters": 33,
+      "ci_high": 0.18467587565919633,
+      "ci_low": 0.12737182893167812,
+      "method": "negative_Abs",
+      "n": 2104,
+      "population": "all_pairs",
+      "positive": 558,
+      "spearman": -0.5271117768292486,
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc": 0.13121618050049383,
+      "bird_clusters": 33,
+      "ci_high": 0.15413314896650576,
+      "ci_low": 0.10660972111880807,
+      "method": "negative_M",
+      "n": 2104,
+      "population": "all_pairs",
+      "positive": 558,
+      "spearman": -0.563947452084368,
+      "target": "recognition_success"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.1344609394013142,
+      "bird_clusters": 33,
+      "ci_high": 0.21596447437781094,
+      "ci_low": 0.07199151620107502,
+      "method": "E",
+      "n": 1775,
+      "population": "endpoint_active",
+      "positive": 14,
+      "spearman": -0.11201335924573728,
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.8593331710878559,
+      "bird_clusters": 33,
+      "ci_high": 0.9776026539774848,
+      "ci_low": 0.7085416652508393,
+      "method": "C",
+      "n": 1775,
+      "population": "endpoint_active",
+      "positive": 14,
+      "spearman": 0.20237742462478686,
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.5,
+      "bird_clusters": 33,
+      "ci_high": 0.5,
+      "ci_low": 0.5,
+      "method": "F",
+      "n": 1775,
+      "population": "endpoint_active",
+      "positive": 14,
+      "spearman": null,
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.19570860712257643,
+      "bird_clusters": 33,
+      "ci_high": 0.259346591872351,
+      "ci_low": 0.13990021324740426,
+      "method": "Abs",
+      "n": 1775,
+      "population": "endpoint_active",
+      "positive": 14,
+      "spearman": -0.0932450311874746,
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.11730348016549041,
+      "bird_clusters": 33,
+      "ci_high": 0.17175342993850268,
+      "ci_low": 0.07282220654096405,
+      "method": "M",
+      "n": 1775,
+      "population": "endpoint_active",
+      "positive": 14,
+      "spearman": -0.11727097697331683,
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.07426786728319948,
+      "bird_clusters": 33,
+      "ci_high": 0.12056894393032115,
+      "ci_low": 0.03307058612294217,
+      "method": "signed_endpoint",
+      "n": 1775,
+      "population": "endpoint_active",
+      "positive": 14,
+      "spearman": -0.1304585240394206,
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.10659527865660745,
+      "bird_clusters": 33,
+      "ci_high": 0.15659498069282204,
+      "ci_low": 0.052250321457646076,
+      "method": "signed_net",
+      "n": 1775,
+      "population": "endpoint_active",
+      "positive": 14,
+      "spearman": -0.12055232704443031,
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc": 0.8042913928774235,
+      "bird_clusters": 33,
+      "ci_high": 0.8600997867525958,
+      "ci_low": 0.740653408127649,
+      "method": "negative_Abs",
+      "n": 1775,
+      "population": "endpoint_active",
+      "positive": 14,
+      "spearman": 0.0932450311874746,
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc": 0.8826965198345096,
+      "bird_clusters": 33,
+      "ci_high": 0.927177793459036,
+      "ci_low": 0.8282465700614973,
+      "method": "negative_M",
+      "n": 1775,
+      "population": "endpoint_active",
+      "positive": 14,
+      "spearman": 0.11727097697331683,
+      "target": "offpath_reversal"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.5,
+      "bird_clusters": 33,
+      "ci_high": 0.5,
+      "ci_low": 0.5,
+      "method": "E",
+      "n": 329,
+      "population": "endpoint_null",
+      "positive": 92,
+      "spearman": null,
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.5,
+      "bird_clusters": 33,
+      "ci_high": 0.5,
+      "ci_low": 0.5,
+      "method": "C",
+      "n": 329,
+      "population": "endpoint_null",
+      "positive": 92,
+      "spearman": null,
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.6075032104201065,
+      "bird_clusters": 33,
+      "ci_high": 0.7043962755376437,
+      "ci_low": 0.502774950378501,
+      "method": "F",
+      "n": 329,
+      "population": "endpoint_null",
+      "positive": 92,
+      "spearman": 0.16714225297636245,
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.6075032104201065,
+      "bird_clusters": 33,
+      "ci_high": 0.7043962755376437,
+      "ci_low": 0.502774950378501,
+      "method": "Abs",
+      "n": 329,
+      "population": "endpoint_null",
+      "positive": 92,
+      "spearman": 0.16714225297636245,
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.5609521188772701,
+      "bird_clusters": 33,
+      "ci_high": 0.6734135885843106,
+      "ci_low": 0.46086319960067385,
+      "method": "M",
+      "n": 329,
+      "population": "endpoint_null",
+      "positive": 92,
+      "spearman": 0.09476623472934545,
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.5463676389653274,
+      "bird_clusters": 33,
+      "ci_high": 0.6252210405157559,
+      "ci_low": 0.46676963913195013,
+      "method": "signed_endpoint",
+      "n": 329,
+      "population": "endpoint_null",
+      "positive": 92,
+      "spearman": 0.07209079255934404,
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "prespecified_positive_or_signed_score",
+      "auroc": 0.5356356631810677,
+      "bird_clusters": 33,
+      "ci_high": 0.6324665659461243,
+      "ci_low": 0.4394532797029703,
+      "method": "signed_net",
+      "n": 329,
+      "population": "endpoint_null",
+      "positive": 92,
+      "spearman": 0.05540508983047511,
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc": 0.3924967895798936,
+      "bird_clusters": 33,
+      "ci_high": 0.49722504962149894,
+      "ci_low": 0.29560372446235644,
+      "method": "negative_Abs",
+      "n": 329,
+      "population": "endpoint_null",
+      "positive": 92,
+      "spearman": -0.16714225297636245,
+      "target": "offpath_instability"
+    },
+    {
+      "analysis_status": "posthoc_direction_control",
+      "auroc": 0.4390478811227298,
+      "bird_clusters": 33,
+      "ci_high": 0.5391368003993261,
+      "ci_low": 0.32658641141568934,
+      "method": "negative_M",
+      "n": 329,
+      "population": "endpoint_null",
+      "positive": 92,
+      "spearman": -0.09476623472934545,
+      "target": "offpath_instability"
+    }
+  ],
+  "run_artifacts": "supplemental_experiments/02_cub_sub/runs/clip_b32_laion2b",
+  "single_image": {
+    "clean_bird_class_accuracy_33_way": 0.5045572916666666,
+    "clean_macro_bird_attribute_cell_accuracy": 0.5087890625,
+    "note": "Uses every released target attribute and all official prompt alternatives in its group; does not claim exact replication of paper tables/112-concept CBM filtering.",
+    "number_of_attributes": 33,
+    "number_of_cells": 768,
+    "task": "Official-style modified attribute recognition (group-wise CLIP cosine argmax)",
+    "views": [
+      {
+        "accuracy": 0.5087890625,
+        "bird_cluster_95ci": [
+          0.46664323392941814,
+          0.5522924046210841
+        ],
+        "n": 3072,
+        "view": "clean"
+      },
+      {
+        "accuracy": 0.5100911458333334,
+        "bird_cluster_95ci": [
+          0.46628169509994916,
+          0.5557977117996881
+        ],
+        "n": 3072,
+        "view": "horizontal_flip"
+      },
+      {
+        "accuracy": 0.5009765625,
+        "bird_cluster_95ci": [
+          0.4590068717277487,
+          0.5459583508721497
+        ],
+        "n": 3072,
+        "view": "gaussian_blur_1.5"
+      },
+      {
+        "accuracy": 0.5169270833333334,
+        "bird_cluster_95ci": [
+          0.4731430868029651,
+          0.55995349945557
+        ],
+        "n": 3072,
+        "view": "jpeg_quality_40"
+      },
+      {
+        "accuracy": 0.4892578125,
+        "bird_cluster_95ci": [
+          0.446859900373599,
+          0.5360759144632308
+        ],
+        "n": 3072,
+        "view": "downsample_128"
+      }
+    ]
+  },
+  "source": {
+    "code_revision": "953a7559878a29e2c7c4a9c79db5e72eee046a85",
+    "feature_names": {
+      "attr_label": [
+        "has_back_color--grey",
+        "has_belly_pattern--striped",
+        "has_bill_color--grey",
+        "has_bill_shape--needle",
+        "has_breast_color--blue",
+        "has_breast_color--red",
+        "has_breast_color--white",
+        "has_breast_pattern--spotted",
+        "has_crown_color--black",
+        "has_crown_color--grey",
+        "has_crown_color--pink",
+        "has_crown_color--white",
+        "has_eye_color--blue",
+        "has_eye_color--white",
+        "has_eye_color--yellow",
+        "has_forehead_color--grey",
+        "has_leg_color--black",
+        "has_leg_color--grey",
+        "has_leg_color--pink",
+        "has_primary_color--blue",
+        "has_primary_color--brown",
+        "has_primary_color--green",
+        "has_primary_color--orange",
+        "has_tail_pattern--multi-colored",
+        "has_tail_pattern--solid",
+        "has_throat_color--blue",
+        "has_throat_color--yellow",
+        "has_underparts_color--green",
+        "has_underparts_color--red",
+        "has_upperparts_color--yellow",
+        "has_wing_color--black",
+        "has_wing_color--grey",
+        "has_wing_color--white"
+      ],
+      "bird_label": [
+        "American_Goldfinch",
+        "Anna_Hummingbird",
+        "Barn_Swallow",
+        "Black_and_white_Warbler",
+        "Blue_Jay",
+        "Cardinal",
+        "Cedar_Waxwing",
+        "Common_Raven",
+        "Dark_eyed_Junco",
+        "Downy_Woodpecker",
+        "European_Goldfinch",
+        "Gadwall",
+        "Gray_Catbird",
+        "Green_Jay",
+        "Green_Kingfisher",
+        "Green_Violetear",
+        "Horned_Puffin",
+        "Lazuli_Bunting",
+        "Mallard",
+        "Northern_Flicker",
+        "Pacific_Loon",
+        "Painted_Bunting",
+        "Pied_Kingfisher",
+        "Pileated_Woodpecker",
+        "Purple_Finch",
+        "Red_bellied_Woodpecker",
+        "Rufous_Hummingbird",
+        "Song_Sparrow",
+        "Tree_Swallow",
+        "Tropical_Kingbird",
+        "Western_Grebe",
+        "White_Pelican",
+        "White_breasted_Nuthatch"
+      ]
+    },
+    "license": "cc-by-nc-4.0",
+    "pairing_provenance": "No source-pair ID or shared cross-attribute seed is published",
+    "queries_sha256": "c81543346bb92bae6f2a866e64550e813d0588dd14fe5fe3ba12d461fbb3a289",
+    "repository": "Jessica-bader/SUB",
+    "revision": "6687681ee20f37b375b9ea8354e5841409fd5d7e",
+    "source_images": "FLUX synthetic; not edited original CUB photographs",
+    "total_rows": 38400
+  },
+  "uncertainty": {
+    "bird_clusters": 33,
+    "method": "percentile bootstrap clustered by bird class",
+    "replicates": 500,
+    "seed": 20261109
+  },
+  "validation": {
+    "actual_pairs": 2104,
+    "authoritative_source": "src/decaf/core/decomposition.py",
+    "authoritative_source_sha256": "4ed9532b981542affc35bb6ab9932cd5430cbd2dc11f841d2d5cc6b613790b75",
+    "common_start_max_abs": 0.0,
+    "epsilon": 0.02,
+    "max_absolute_disagreement": {
+      "Abs": 0.0,
+      "C": 0.0,
+      "E": 0.0,
+      "F": 0.0
+    },
+    "posthoc_orientation_audit": {
+      "comparisons": [
+        {
+          "baseline": "Abs",
+          "complement_identity_error": 0.0,
+          "population": "all_pairs",
+          "target": "offpath_instability"
+        },
+        {
+          "baseline": "M",
+          "complement_identity_error": 0.0,
+          "population": "all_pairs",
+          "target": "offpath_instability"
+        },
+        {
+          "baseline": "Abs",
+          "complement_identity_error": 0.0,
+          "population": "all_pairs",
+          "target": "recognition_success"
+        },
+        {
+          "baseline": "M",
+          "complement_identity_error": 2.220446049250313e-16,
+          "population": "all_pairs",
+          "target": "recognition_success"
+        },
+        {
+          "baseline": "Abs",
+          "complement_identity_error": 0.0,
+          "population": "endpoint_active",
+          "target": "offpath_instability"
+        },
+        {
+          "baseline": "M",
+          "complement_identity_error": 0.0,
+          "population": "endpoint_active",
+          "target": "offpath_instability"
+        },
+        {
+          "baseline": "Abs",
+          "complement_identity_error": 1.1102230246251565e-16,
+          "population": "endpoint_active",
+          "target": "offpath_reversal"
+        },
+        {
+          "baseline": "M",
+          "complement_identity_error": 0.0,
+          "population": "endpoint_active",
+          "target": "offpath_reversal"
+        },
+        {
+          "baseline": "Abs",
+          "complement_identity_error": 0.0,
+          "population": "endpoint_active",
+          "target": "recognition_success"
+        },
+        {
+          "baseline": "M",
+          "complement_identity_error": 0.0,
+          "population": "endpoint_active",
+          "target": "recognition_success"
+        },
+        {
+          "baseline": "Abs",
+          "complement_identity_error": 0.0,
+          "population": "endpoint_null",
+          "target": "offpath_instability"
+        },
+        {
+          "baseline": "M",
+          "complement_identity_error": 0.0,
+          "population": "endpoint_null",
+          "target": "offpath_instability"
+        },
+        {
+          "baseline": "Abs",
+          "complement_identity_error": null,
+          "population": "endpoint_null",
+          "target": "recognition_success"
+        },
+        {
+          "baseline": "M",
+          "complement_identity_error": null,
+          "population": "endpoint_null",
+          "target": "recognition_success"
+        }
+      ],
+      "original_analysis_source_matches_archive": true,
+      "prespecified_rows_unchanged": true
+    },
+    "tests": "6 passed; ruff passed; includes changed-source/preprocess and corrupted-cache/order regression tests"
+  }
+}

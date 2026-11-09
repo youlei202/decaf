@@ -1,0 +1,27 @@
+{
+  "dataset_root": "/absolute/path/to/imagenet9",
+  "pair_manifest": "/absolute/path/to/paired_manifest.parquet",
+  "mapping": "/absolute/path/to/imagenet_to_imagenet9.json",
+  "stage_counts": [3, 5, 9, 17, 33, 65],
+  "epsilon": 0.02,
+  "paths": ["blend", "patch_A"],
+  "pair_types": ["same_rand", "same_next"],
+  "max_source_pairs": 768,
+  "selection_seed": 20261109,
+  "image_size": 224,
+  "blur_sigma": 8.0,
+  "patch_grid": [8, 8],
+  "patch_seed": 7101,
+  "pair_shard_size": 32,
+  "pair_batch_size": 4,
+  "query_batch_size": 32,
+  "models": [
+    {
+      "model_id": "resnet18_imagenet1k",
+      "kind": "pretrained",
+      "architecture": "resnet18",
+      "output_classes": 1000,
+      "checkpoint": "/absolute/path/to/resnet18-f37072fd.pth"
+    }
+  ]
+}
